@@ -1,2 +1,5 @@
 # Ignore our developer directory
 /.dev
+
+# Ignore VSCode ctags
+**/.vstags
