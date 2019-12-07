@@ -1,15 +1,17 @@
 #!perl
 
 # Internal perl
-use warnings;
-use strict;
+use 5.010001;
 use feature 'say';
 
 # Internal perl modules
-use Getopt::Long;
+use warnings;
+use strict;
 
 # External modules 
 use App::aep;
+use YAML::XS;
+use Getopt::Long::Descriptive;
 
 # Version of this software
 our $VERSION = '0.007';
@@ -18,20 +20,26 @@ my $app = App::aep->new(\&signal_handle);
 
 sub signal_handle 
 {
-    my $value = shift;
-    say "Here: $value";
+    my ($value,@other) = @_;
+
+    say "Signal: $value";
 
     if ($value eq 'INT') 
     {
-        warn "INT CAUGHT!";
+        # Pass the message to children, then exit yourself or perhaps wait 
+        # on them dieing for a little while?
+
+        # Clean up any run wheels
+
+        # Exit cleanly
+        exit 0;
     }
     
 }
 
-
 =head1 NAME
 
-aep - Binary for using as an entry point
+aep - Binary for using as an entry point within containers
 
 =head1 DESCRIPTION
 
