@@ -12,7 +12,7 @@ use Getopt::Long;
 use App::aep;
 
 # Version of this software
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 
 my $app = App::aep->new(\&signal_handle);
 
