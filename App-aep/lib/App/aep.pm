@@ -7,7 +7,7 @@ use 5.028;
 use feature 'say';
 use Data::Dumper;
 
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 
 sub new 
 {
