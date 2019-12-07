@@ -2,6 +2,7 @@ Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
   - Adding in signal captures
+  - Updated bin/aep to initilize signal capture
 
 0.001     2019-12-07 16:46:00+00:00 Europe/London
   - Added in a small test creating a binary called aep
