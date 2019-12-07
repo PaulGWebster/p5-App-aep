@@ -1,6 +1,7 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
+  - Tidied up a little
 
 0.002     2019-12-07 18:29:10 GMT
   - Adding in signal captures
