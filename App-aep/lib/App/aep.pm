@@ -97,8 +97,6 @@ Default value: disabled
 
 Only listen to command line arguments
 
-=he
-
 =head3 --config-merge (default)
 
 Default value: enabled 
