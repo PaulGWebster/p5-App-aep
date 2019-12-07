@@ -1,6 +1,4 @@
-Revision history for perl application aep (Advanced Entry Point)
-
-{{ $NEXT }}
+Revision history for perl application aep (Advanced Entry Point), developer note: {{ $NEXT }}
 
 0.003     2019-12-07 18:40:20 GMT
   - Tidied up a little
