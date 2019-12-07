@@ -3,7 +3,35 @@
 use App::aep;
 use feature 'say';
 
+use Getopt::Long;
 
-my $x = App::aep->new();
+my $app = App::aep->new(\&signal_handle);
 
-say $x->hello("test");
+sub signal_handle {
+    my $value = shift;
+    say "Here: $value";
+
+
+}
+
+
+=head1 NAME
+
+aep - Binary for using as an entry point
+
+=head1 DESCRIPTION
+
+=for comment The module's description.
+
+Please refer to L<App::aep> for documentation.
+
+=head1 AUTHOR
+
+Paul G Webster <daemon@cpan.org>
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2019 by Paul G Webster.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.

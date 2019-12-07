@@ -5,23 +5,35 @@ use warnings;
 
 use 5.028;
 use feature 'say';
+use Data::Dumper;
 
 our $VERSION = '0.001';
 
-sub new {
-  my ($class,$options) = @_;
+sub new 
+{
+    my ($class,$callback) = @_;
 
-  my $self = bless {
-  }, $class;
+    if (
+        (!$callback) ||
+        (ref $callback ne 'CODE')
+    ) 
+    {
+        print STDERR "new() must be called with a reference to a function\n";
+        print STDERR "An example of this would be ->new(\&my_handler)\n";
+        exit 1;
+    }
 
-  return $self;
+    my $self = bless {
+        callback => $callback
+    }, $class;
+
+    foreach my $signal (keys %SIG) { 
+        $SIG{$signal} = sub { &{$self->{callback}}($signal) };
+    }
+
+    return $self;
 }
 
-sub hello {
-    my ($self,$msg) = @_;
-
-    return $msg // "";
-}
 
 1;
 
