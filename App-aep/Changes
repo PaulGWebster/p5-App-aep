@@ -1,6 +1,8 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
+
+0.007     2019-12-07 23:36:46 GMT
   - Greatly increased documentation to show how the config will be handled
   - Added exit on INT to signal handler
 0.006     2019-12-07 19:09:57 GMT
