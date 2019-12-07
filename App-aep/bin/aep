@@ -16,9 +16,16 @@ our $VERSION = '0.005';
 
 my $app = App::aep->new(\&signal_handle);
 
-sub signal_handle {
+sub signal_handle 
+{
     my $value = shift;
     say "Here: $value";
+
+    if ($value eq 'INT') 
+    {
+        warn "INT CAUGHT!";
+    }
+    
 }
 
 
