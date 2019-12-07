@@ -7,7 +7,7 @@ use 5.028;
 use feature 'say';
 use Data::Dumper;
 
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 
 =head1 NAME
 
