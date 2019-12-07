@@ -3,7 +3,25 @@ package App::aep;
 use strict;
 use warnings;
 
+use 5.028;
+use feature 'say';
+
 our $VERSION = '0.001';
+
+sub new {
+  my ($class,$options) = @_;
+
+  my $self = bless {
+  }, $class;
+
+  return $self;
+}
+
+sub hello {
+    my ($self,$msg) = @_;
+
+    return $msg // "";
+}
 
 1;
 

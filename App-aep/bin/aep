@@ -1,0 +1,9 @@
+#!perl
+
+use App::aep;
+use feature 'say';
+
+
+my $x = App::aep->new();
+
+say $x->hello("test");
