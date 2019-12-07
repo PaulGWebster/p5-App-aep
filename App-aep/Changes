@@ -1,8 +1,7 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
+
+0.001     2019-12-07 16:46:00+00:00 Europe/London
   - Added in a small test creating a binary called aep
-
-0.001     2019-12-07 00:00:01+01:00 Europe/London
-
   - Initial module creation
