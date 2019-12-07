@@ -9,6 +9,24 @@ use Data::Dumper;
 
 our $VERSION = '0.003';
 
+=head1 NAME
+
+App::aep - Module abstract placeholder text
+
+=head1 SYNOPSIS
+
+=for comment Brief examples of using the module.
+
+=head1 DESCRIPTION
+
+=for comment The module's description.
+
+This app is a dynamic entry point for use in container systems such as docker
+unlike most perl modules, this has been created to correctly react to signals
+so it will exit cleanly and correctly.
+
+=cut
+
 sub new 
 {
     my ($class,$callback) = @_;
@@ -36,18 +54,6 @@ sub new
 
 
 1;
-
-=head1 NAME
-
-App::aep - Module abstract placeholder text
-
-=head1 SYNOPSIS
-
-=for comment Brief examples of using the module.
-
-=head1 DESCRIPTION
-
-=for comment The module's description.
 
 =head1 AUTHOR
 
