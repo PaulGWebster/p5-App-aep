@@ -55,6 +55,11 @@ sub new
 
 1;
 
+=head1 BUGS
+
+For any feature requests or bug reports please visit:
+* Github L<https://github.com/PaulGWebster/p5-App-aep>
+
 =head1 AUTHOR
 
 Paul G Webster <daemon@cpan.org>
