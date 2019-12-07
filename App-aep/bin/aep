@@ -18,6 +18,107 @@ our $VERSION = '0.007';
 
 my $app = App::aep->new(\&signal_handle);
 
+my ($opt, $usage) = describe_options(
+    'aep %o <some-arg>',
+    [
+        'config-env',
+        'Read config values from ehe enviroment only.' 
+    ],
+    [ 
+        'config-file',
+        'Read config from a config file only.'
+    ],
+    [ 
+        'config-args',
+        'Read config values from arguments only.'
+    ],
+    [ 
+        'config-merge',
+        'Merge together env, file and args to generate a config.'
+    ],
+    [ 
+        'config-order=s',
+        'The order to merge options together, comma seperated, default is: env,file,args'
+    ],
+    [],
+    [ 
+        'env-prefix=s',
+        'What prefix to look for on enviromentals, default is aep_'
+    ],
+    [],
+    [
+        'command=s',
+        'What to actually run within the container, default is print aes help.'
+    ],
+    [
+        'command-args',
+        'The arguments to add to the command, default is nothing.'
+    ],
+    [
+        'command-restart=i',
+        'If the command exits how many times to retry it, default 0 set to -1 for infinate'
+    ],
+    [
+        'command-restart-delay=i',
+        'The time in milliseconds to wait before retrying the command, default 1000'
+    ],
+    [],
+    [
+        'lock-server',
+        'Act like a lock server, this means we will expect other aeps to connect to us, we in turn will say when they should actually start, this is to counter-act race issues when starting multi image containers such as docker-compose, default: no'
+    ],
+    [
+        'lock-server-host=s',
+        'What host to bind to, defaults to 0.0.0.0'
+    ],
+    [
+        'lock-server-port=i',
+        'What port to bind to, defaults to 60000'
+    ],
+    [
+        'lock-server-default-run',
+        'If we get sent an ID we do not know what to do with, tell it to run'
+    ],
+    [
+        'lock-server-default-ignore',
+        'If we get sent an ID we do not know what to do with, ignore it'
+    ],
+    [
+        'lock-server-order',
+        'The list of ids and the order to allow them to run, allows OR || operators, for example: db,redis1||redis2,redis1||redis2,nginx'
+    ],
+    [],
+    [
+        'lock-client',
+        'Become a lock client, this will mean your aep will connect to another aep to learn when it should run its command.'
+    ],
+    [
+        'lock-server-host=s',
+        'What host to connect to, defaults to: aep-master'
+    ],
+    [
+        'lock-server-port=i',
+        'What port to connect to, defaults to 60000'
+    ],
+    [
+        'lock-id=s',
+        'What ID we should say we are, mandatory when acting as a lock-client'
+    ],
+    [],
+    [ 
+        'help',
+        'print usage message and exit', 
+        { 
+            shortcircuit => 1 
+        } 
+    ],
+);
+
+#print($usage->text), exit if 
+say $usage->text;
+
+# Sub routines
+
 sub signal_handle 
 {
     my ($value,@other) = @_;

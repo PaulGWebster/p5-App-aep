@@ -45,6 +45,15 @@ sub new
     return $self;
 }
 
+sub default_config 
+{
+    return 
+    {
+        command         =>  'aes',
+        command_args    =>  qw(--config-args --help),
+    }
+}
+
 =head1 SYNOPSIS
 
 =for comment Brief examples of using the module.
@@ -76,7 +85,7 @@ Default value: disabled
 
 Only read command line options from the enviroment
 
-=head3 --config-only
+=head3 --config-file
 
 Default value: disabled
 
@@ -106,10 +115,90 @@ The order to merge options together,
 
 =head3 --env-prefix (default)
 
-Default value: aep_
+Default value: aep-
 
 When scanning the enviroment aep will look for this prefix to know which 
 environment variables it should pay attention to.
+
+=head2 Command related (what to run)
+
+=head3 command (string)
+
+What to actually run within the container, default is print aes help.
+
+=head3 command-args (string)
+
+The arguments to add to the command comma seperated, default is nothing.
+
+Example: --list,--as-service,--with-long "arg",--foreground
+
+=head3 command-restart (integer)
+
+If the command exits how many times to retry it, default 0 set to -1 for infinate
+
+=head3 command-restart-delay (integer)
+
+The time in milliseconds to wait before retrying the command, default 1000
+
+=head2 Lock commands (server)
+
+These are for if you have concerns of 'race' conditions.
+
+=head3 lock-server
+
+Default value: disabled
+
+Act like a lock server, this means we will expect other aeps to connect to us,
+we in turn will say when they should actually start, this is to counter-act
+race issues when starting multi image containers such as docker-compose.
+
+=head3 lock-server-host (string)
+
+What host to bind to, defaults to 0.0.0.0
+
+=head3 lock-server-port (integer)
+
+What port to bind to, defaults to 60000
+
+=head3 lock-server-default-run
+
+Default value: disabled
+
+If we get sent an ID we do not know what to do with, tell it to run.
+
+=head3 lock-server-default-ignore
+
+Default value: enabled
+
+If we get sent an ID we do not know what to do with, ignore it.
+
+=head3 lock-server-order (string)
+
+The list of ids and the order to allow them to run, allows OR || operators, for
+example: db,redis1||redis2,redis1||redis2,nginx
+
+Beware the the lock-server-default-ignore config flag!
+
+=head2 Lock commands (client)
+
+=head3 lock-client
+
+Default value: disabled
+
+Become a lock client, this will mean your aep will connect to another aep to
+learn when it should run its command.
+
+=head3 lock-server-host (string)
+
+What host to connect to, defaults to 'aep-master'
+
+=head3 lock-server-port (integer)
+
+What port to connect to, defaults to 60000
+
+=head3 lock-id (string)
+
+What ID we should say we are
 
 =head1 BUGS
 
