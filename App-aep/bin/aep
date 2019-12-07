@@ -1,17 +1,24 @@
 #!perl
 
-use App::aep;
+# Internal perl
+use warnings;
+use strict;
 use feature 'say';
 
+# Internal perl modules
 use Getopt::Long;
+
+# External modules 
+use App::aep;
+
+# Version of this software
+our $VERSION = '0.004';
 
 my $app = App::aep->new(\&signal_handle);
 
 sub signal_handle {
     my $value = shift;
     say "Here: $value";
-
-
 }
 
 
