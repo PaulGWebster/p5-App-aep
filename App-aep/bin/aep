@@ -14,7 +14,7 @@ use YAML::XS;
 use Getopt::Long::Descriptive;
 
 # Version of this software
-our $VERSION = '0.007';
+our $VERSION = '0.008';
 
 my $app = App::aep->new(\&signal_handle);
 
