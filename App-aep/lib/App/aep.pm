@@ -10,6 +10,7 @@ use strict;
 use Data::Dumper;
 
 # External modules 
+use POE qw(Wheel::Run Filter::Reference);
 
 # Version of this software
 our $VERSION = '0.008';
@@ -34,6 +35,14 @@ sub new
         exit 1;
     }
 
+    my $session = POE::Session->create
+    (
+        inline_states => {
+            _start      => \&start_tasks,
+            sig_child   => \&sig_child,
+        }
+    );
+
     my $self = bless {
         callback => $callback
     }, $class;
@@ -45,14 +54,19 @@ sub new
     return $self;
 }
 
-sub default_config 
-{
-    return 
-    {
-        command         =>  'aes',
-        command_args    =>  qw(--config-args --help),
-    }
+sub start_tasks {
+  my ($kernel, $heap) = @_[KERNEL, HEAP];
 }
+
+# Detect the CHLD signal as each of our children exits.
+sub sig_child {
+  my ($heap, $sig, $pid, $exit_val) = @_[HEAP, ARG0, ARG1, ARG2];
+  #my $details = delete $heap->{$pid};
+  warn "Got sig_child";
+
+  # warn "$$: Child $pid exited";
+}
+
 
 =head1 SYNOPSIS
 
@@ -223,6 +237,8 @@ What port to connect to, defaults to 60000
 
 =head3 lock-trigger (string)
 
+Default: none:time:10000
+
 What to look for to know that our target command has executed correctly, if the 
 target command dies or exits before this filter can complete, the success will 
 never be reported, if you have also set restart options the lock-trigger will 
@@ -232,7 +248,7 @@ The syntax for the filters is:
 
     handle:filter:specification
 
-handle will be stderr, stdout or both
+handle can be stderr, stdout, both or none
 
 So an example for a filter that will match 'now serving requests':
 
@@ -244,25 +260,35 @@ Several standard filters are availible:
 
 =item * 
 
-time - Wait this many milliseconds and then report success, example: both:time:2000
+time - Wait this many milliseconds and then report success.
+
+Example: none:time:2000
 
 =item *
 
-regex - Wait till this regex matches to report success. example: both:
+regex - Wait till this regex matches to report success.
+
+Example: both:regex:ok|success
 
 =item * 
 
-text - Wait till this line of text is seen 
+text - Wait till this line of text is seen. 
+
+Example: both:text:success
 
 =item *
 
 script - Run a script or binary somewhere else on the system and use its exit 
-code to determine success or failure
+code to determine success or failure.
+
+Example: none:script:/opt/check_state
 
 =item * 
 
 connect - Try to connect to a tcp port, no data is sent and any recieved is 
 ignored. Will be treated as success if the connect its self succeeds.
+
+Example: none:connect:127.0.0.1:6767
 
 =back
 
@@ -294,4 +320,7 @@ This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut 
+
+$poe_kernel->run();
+
 1;
