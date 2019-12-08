@@ -79,31 +79,31 @@ Signals passed to this entrypoint will also be passed down to the child.
 
 =head2 config related
 
-=head3 --config-env
+=head3 config-env
 
 Default value: disabled
 
 Only read command line options from the enviroment
 
-=head3 --config-file
+=head3 config-file
 
 Default value: disabled
 
 Only read command line options from the enviroment
 
-=head3 --config-args
+=head3 config-args
 
 Default value: disabled
 
 Only listen to command line arguments
 
-=head3 --config-merge (default)
+=head3 config-merge (default)
 
 Default value: enabled 
 
 Merge together env, config and args to generate a config 
 
-=head3 --config-order (default)
+=head3 config-order (default)
 
 Default value: 'env,conf,args' (left to right)
 
@@ -111,7 +111,7 @@ The order to merge options together,
 
 =head2 environment related
 
-=head3 --env-prefix (default)
+=head3 env-prefix (default)
 
 Default value: aep-
 
@@ -177,6 +177,33 @@ example: db,redis1||redis2,redis1||redis2,nginx
 
 Beware the the lock-server-default-ignore config flag!
 
+=head3 lock-server-exhaust-action (string)
+
+Default value: idle
+
+What to do if all clients have been started (list end), options are: 
+
+
+=over 4 
+
+=item * 
+
+exit-  Exit 0
+
+=item *
+
+idle - Do nothing, just sit there doing nothing
+
+=item *
+
+restart - Reset the lock-server-order list and continue operating
+
+=item * 
+
+execute - Read in any passed commands and args and run them like a normal aep
+
+=back
+
 =head2 Lock commands (client)
 
 =head3 lock-client
@@ -193,6 +220,51 @@ What host to connect to, defaults to 'aep-master'
 =head3 lock-server-port (integer)
 
 What port to connect to, defaults to 60000
+
+=head3 lock-trigger (string)
+
+What to look for to know that our target command has executed correctly, if the 
+target command dies or exits before this filter can complete, the success will 
+never be reported, if you have also set restart options the lock-trigger will 
+continue to try to validate the service.
+
+The syntax for the filters is: 
+
+    handle:filter:specification
+
+handle will be stderr, stdout or both
+
+So an example for a filter that will match 'now serving requests':
+
+    both:text:now serving requests
+
+Several standard filters are availible:
+
+=over 4
+
+=item * 
+
+time - Wait this many milliseconds and then report success, example: both:time:2000
+
+=item *
+
+regex - Wait till this regex matches to report success. example: both:
+
+=item * 
+
+text - Wait till this line of text is seen 
+
+=item *
+
+script - Run a script or binary somewhere else on the system and use its exit 
+code to determine success or failure
+
+=item * 
+
+connect - Try to connect to a tcp port, no data is sent and any recieved is 
+ignored. Will be treated as success if the connect its self succeeds.
+
+=back
 
 =head3 lock-id (string)
 

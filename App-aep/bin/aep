@@ -38,12 +38,12 @@ my ($opt, $usage) = describe_options(
     ],
     [ 
         'config-order=s',
-        'The order to merge options together, comma seperated, default is: env,file,args'
+        'The order to merge options together, comma separated, default is: env,file,args'
     ],
     [],
     [ 
         'env-prefix=s',
-        'What prefix to look for on enviromentals, default is aep_'
+        'What prefix to look for on enviromentals, default is aep-'
     ],
     [],
     [
@@ -87,6 +87,10 @@ my ($opt, $usage) = describe_options(
         'lock-server-order',
         'The list of ids and the order to allow them to run, allows OR || operators, for example: db,redis1||redis2,redis1||redis2,nginx'
     ],
+    [
+        'lock-server-exhaust-action=s',
+        'What to do if all clients have been started (list end), options are: exit, idle, restart or execute. The default is idle'
+    ],
     [],
     [
         'lock-client',
@@ -99,6 +103,10 @@ my ($opt, $usage) = describe_options(
     [
         'lock-server-port=i',
         'What port to connect to, defaults to 60000'
+    ],
+    [
+        'lock-trigger=s',
+        'Please read: https://metacpan.org/pod/App::aep#lock-trigger-(string) or perldoc App::aep'
     ],
     [
         'lock-id=s',
