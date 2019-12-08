@@ -13,7 +13,7 @@ use Data::Dumper;
 use POE qw(Wheel::Run Filter::Reference);
 
 # Version of this software
-our $VERSION = '0.008';
+our $VERSION = '0.009';
 
 =head1 NAME
 
