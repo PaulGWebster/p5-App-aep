@@ -3,3 +3,6 @@
 
 # Ignore VSCode ctags
 **/.vstags
+
+# Ignore the local/ dir as carton will build from vendor/
+App-aep/local
