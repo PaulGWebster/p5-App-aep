@@ -1,6 +1,11 @@
 requires    'perl' => '5.010001';
 requires    'YAML::XS';
 requires    'Getopt::Long::Descriptive';
-requires    'POE';
+requires    'POE' => '1.368';
 requires    'POE::Filter::Reference';
 requires    'POE::Wheel::Run';
+requires    'POE::Session::PlainCall' => '0.0301';
+requires    'Try::Tiny';
+requires    'Carp';
+requires    'Carton' => '1.0.35';
+requires    'App::cpanminus' => '1.7044';
