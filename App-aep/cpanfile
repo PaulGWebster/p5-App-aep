@@ -9,3 +9,4 @@ requires    'Try::Tiny';
 requires    'Carp';
 requires    'Carton' => '1.0.35';
 requires    'App::cpanminus' => '1.7044';
+requires    'POE::Wheel::SocketFactory';
