@@ -1,71 +1,224 @@
+#!/usr/bin/env perl
+
 package App::aep;
-
-# Internal perl
-use 5.028;
-use feature 'say';
-
-# Internal perl modules
-use warnings;
-use strict;
-use Data::Dumper;
-
-# External modules 
-use POE qw(Wheel::Run Filter::Reference);
 
 # Version of this software
 our $VERSION = '0.009';
 
-=head1 NAME
+# Core
+use warnings;
+use strict;
+use utf8;
+use v5.28;
 
-App::aep - Advanced Entry Point (for docker and other containers)
+# Core - Experimental (stable)
+use experimental 'signatures';
 
-=cut
+# Debug
+use Data::Dumper;
+use Carp qw(cluck longmess shortmess);
 
-sub new 
-{
-    my ($class,$callback) = @_;
+# External
+use POE qw(Session::PlainCall);
+use Try::Tiny;
 
-    if (
-        (!$callback) ||
-        (ref $callback ne 'CODE')
-    )
-    {
-        print STDERR "new() must be called with a reference to a function\n";
-        print STDERR "An example of this would be ->new(\&my_handler)\n";
-        exit 1;
-    }
+# create a new blessed object, we will carry any passed arguments forward.
+sub new ($class, @args) {
+    my $self = bless {
+        '_passed_args'  =>  $args[0]->{'_passed_args'},
+    }, $class;
+}
 
-    my $session = POE::Session->create
-    (
-        inline_states => {
-            _start      => \&start_tasks,
-            sig_child   => \&sig_child,
-        }
+# POE::Kernel's _start, in this case it also tells the kernel to capture signals
+sub _start ($self,@args) {
+    poe->kernel->sig( INT   => 'sig_int' );
+    poe->kernel->sig( TERM  => 'sig_term' );
+    poe->kernel->sig( CHLD  => 'sig_chld' );
+    poe->kernel->sig( USR   => 'sig_usr' );
+
+    my $debug = poe->heap->{'_'}->{'debug'};
+    $debug->(
+        'STDERR',
+        __LINE__,
+        'Signals(INT,TERM,CHLF,USR) trapped.'
     );
 
-    my $self = bless {
-        callback => $callback
-    }, $class;
+    # What command are we meant to be running?
+    my $opt = poe->heap->{'_'}->{'opt'};
+    #say STDERR Dumper $opt;
 
-    foreach my $signal (keys %SIG) { 
-        $SIG{$signal} = sub { &{$self->{callback}}($signal) };
+    # Are we doing a docker check?
+    # TODO
+    if ($opt->docker_health_check) {
+        $debug->(
+            'STDERR',
+            __LINE__,
+            'Would spawn a unix socket client to try talk to instance.'
+        );
     }
 
-    return $self;
+    poe->kernel->yield( 'scheduler' );
 }
 
-sub start_tasks {
-  my ($kernel, $heap) = @_[KERNEL, HEAP];
+sub sig_int {
+    # Set an appropriate exit
+    poe->heap->{'_'}->{'set_exit'}->('1','sigint');
+    # Announce the event
+    poe->heap->{'_'}->{'debug'}->(
+        'STDERR',
+        __LINE__,
+        'Signal: INT - starting controlled shutdown.'
+    );
+    # Tell the kernel to ignore the term we are handling it
+    poe->kernel->sig_handled();
+    # Send kill to the child
+    # ... todo ...
+    # Stop the event wheel
+    poe->kernel->stop();
+}
+sub sig_term {
+    # Set an appropriate exit
+    poe->heap->{'_'}->{'set_exit'}->('1','sigterm');
+    # Announce the event
+    poe->heap->{'_'}->{'debug'}->(
+        'STDERR',
+        __LINE__,
+        'Signal: TERM - starting controlled shutdown.'
+    );
+    # Tell the kernel to ignore the term we are handling it
+    poe->kernel->sig_handled();
+    # Send kill to the child
+    # ... todo ...
+    # Stop the event wheel
+    poe->kernel->stop();
+}
+sub sig_chld {
+    # Announce the event
+    poe->heap->{'_'}->{'debug'}->(
+        'STDERR',
+        __LINE__,
+        'Signal CHLD, ignoring'
+    );
+}
+sub sig_usr {
+    # Announce the event
+    poe->heap->{'_'}->{'debug'}->(
+        'STDERR',
+        __LINE__,
+        'Signal USR, ignoring'
+    );
+}
+sub scheduler {
+    if (poe->heap->{'exit'}++ >= 2) {
+        poe->heap->{'_'}->{'set_exit'}->('0','test');
+        #poe->kernel->yield('set_exit',0,'test');
+    }
+    else {
+        poe->kernel->delay_add('scheduler' => 1);
+    }
 }
 
-# Detect the CHLD signal as each of our children exits.
-sub sig_child {
-  my ($heap, $sig, $pid, $exit_val) = @_[HEAP, ARG0, ARG1, ARG2];
-  #my $details = delete $heap->{$pid};
-  warn "Got sig_child";
+# ABSTRACT: turns baubles into trinkets
 
-  # warn "$$: Child $pid exited";
-}
+
+
+# Not sure we need a dedicated runner for such a simple one exec task!
+
+# package INIT::Runner;
+
+# use warnings;
+# use strict;
+# use utf8;
+# use v5.28;
+
+# use experimental 'signatures';
+# use Data::Dumper;
+
+# use POE qw(Session::PlainCall Wheel::Run Filter::Reference);
+
+# sub new ($class, @args) {
+#     say STDERR Dumper \@args;
+#     my $self = bless {
+#         '_passed_args'  =>  \@args,
+#     }, $class;
+# }
+
+# sub _start {
+#     poe->kernel->yield( 'scheduler' );
+# }
+# sub scheduler {
+#     poe->kernel->delay_add('scheduler' => 1);
+#     say STDERR "Runner: ping pong";
+# }
+
+
+
+# # Internal perl
+# use 5.028;
+# use feature 'say';
+
+# # Internal perl modules
+# use warnings;
+# use strict;
+# use Data::Dumper;
+
+# # External modules 
+# use POE qw(Wheel::Run Filter::Reference);
+
+# # Version of this software
+# our $VERSION = '0.009';
+
+# =head1 NAME
+
+# App::aep - Advanced Entry Point (for docker and other containers)
+
+# =cut
+
+# sub new 
+# {
+#     my ($class,$callback) = @_;
+
+#     if (
+#         (!$callback) ||
+#         (ref $callback ne 'CODE')
+#     )
+#     {
+#         print STDERR "new() must be called with a reference to a function\n";
+#         print STDERR "An example of this would be ->new(\&my_handler)\n";
+#         exit 1;
+#     }
+
+#     my $session = POE::Session->create
+#     (
+#         inline_states => {
+#             _start      => \&start_tasks,
+#             sig_child   => \&sig_child,
+#         }
+#     );
+
+#     my $self = bless {
+#         callback => $callback
+#     }, $class;
+
+#     foreach my $signal (keys %SIG) { 
+#         $SIG{$signal} = sub { &{$self->{callback}}($signal) };
+#     }
+
+#     return $self;
+# }
+
+# sub start_tasks {
+#   my ($kernel, $heap) = @_[KERNEL, HEAP];
+# }
+
+# # Detect the CHLD signal as each of our children exits.
+# sub sig_child {
+#   my ($heap, $sig, $pid, $exit_val) = @_[HEAP, ARG0, ARG1, ARG2];
+#   #my $details = delete $heap->{$pid};
+#   warn "Got sig_child";
+
+#   # warn "$$: Child $pid exited";
+# }
 
 
 =head1 SYNOPSIS
@@ -304,7 +457,7 @@ For any feature requests or bug reports please visit:
 
 You may also catch up to the author 'daemon' on IRC:
 
-* irc.freenode.net
+* irc.libera.org
 
 * #perl
 
@@ -314,13 +467,11 @@ Paul G Webster <daemon@cpan.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2019 by Paul G Webster.
+This software is copyright (c) 2023 by Paul G Webster.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
 
 =cut 
-
-$poe_kernel->run();
 
 1;
