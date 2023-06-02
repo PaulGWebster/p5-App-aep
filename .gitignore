@@ -1,8 +1,10 @@
 # Ignore our developer directory
 /.dev
 
-# Ignore VSCode ctags
+# Ignore VSCode stuff
 **/.vstags
+.vscode/
 
 # Ignore the local/ dir as carton will build from vendor/
 App-aep/local
+
