@@ -105,7 +105,10 @@ my @opt_desc = (
     [],
     [
         'lock-server',
-'Act like a lock server, this means we will expect other aeps to connect to us, we in turn will say when they should actually start, this is to counter-act race issues when starting multi image containers such as docker-compose, default: no',
+        'Act like a lock server, this means we will expect other aeps to '
+            . 'connect to us, we in turn will say when they should actually start, '
+            . 'this is to counter-act race issues when starting multi image '
+            . 'containers such as docker-compose, default: no',
         {
             'default' => 0,
         },
@@ -140,14 +143,16 @@ my @opt_desc = (
     ],
     [
         'lock-server-order',
-'The list of ids and the order to allow them to run, allows OR || operators, for example: db,redis1||redis2,redis1||redis2,nginx',
+        'The list of ids and the order to allow them to run, allows OR || '
+            . 'operators, for example: db,redis1||redis2,redis1||redis2,nginx',
         {
             'default' => '',
         },
     ],
     [
         'lock-server-exhaust-action=s',
-'What to do if all clients have been started (list end), options are: exit, idle, restart or execute. The default is idle',
+        'What to do if all clients have been started (list end), options are: '
+            . 'exit, idle, restart or execute. The default is idle',
         {
             'default' => 'idle',
         },
@@ -155,7 +160,8 @@ my @opt_desc = (
     [],
     [
         'lock-client',
-'Become a lock client, this will mean your aep will connect to another aep to learn when it should run its command.',
+        'Become a lock client, this will mean your aep will connect to '
+            . 'another aep to learn when it should run its command.',
         {
             'default' => 0,
         },
@@ -198,7 +204,8 @@ my @opt_desc = (
     ],
     [
         'help-config=s',
-'print configuration examples for: config-env, config-files, config-arg or config-merge eg: help-config config-env',
+        'print configuration examples for: config-env, config-files, '
+            . 'config-arg or config-merge eg: help-config config-env',
         {
             'shortcircuit' => 1,
         },

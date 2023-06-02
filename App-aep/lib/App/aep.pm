@@ -21,12 +21,12 @@ use Carp qw(cluck longmess shortmess);
 
 # External
 use POE qw(
-  Session::PlainCall
-  Wheel::SocketFactory
-  Wheel::ReadWrite
-  Filter::Stackable
-  Filter::Line
-  Filter::JSONMaybeXS
+    Session::PlainCall
+    Wheel::SocketFactory
+    Wheel::ReadWrite
+    Filter::Stackable
+    Filter::Line
+    Filter::JSONMaybeXS
 );
 use Try::Tiny;
 
@@ -157,8 +157,7 @@ sub unixsocket_client_connected ( $self, $socket, @args )
     poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'rx_count' } = 0;
 
     # Create a mapping from the wheelid to the client
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'cid2wid' }->{ $client_id } =
-      $rw_wheel->ID;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'cid2wid' }->{ $client_id } = $rw_wheel->ID;
 
     # And the other way
     poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $rw_wheel->ID } = $client_id;
@@ -195,8 +194,7 @@ sub unixsocket_server_send ( $self, $cid, $pkt )
 
 sub unixsocket_client_input ( $self, $input, $wid )
 {
-    my $cid =
-      poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $cid   = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
     # Increment the received packet count
@@ -217,8 +215,7 @@ sub unixsocket_client_input ( $self, $input, $wid )
 
 sub unixsocket_client_error ( $self, $syscall, $errno, $error, $wid )
 {
-    my $cid =
-      poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $cid   = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
     if ( !$errno )
