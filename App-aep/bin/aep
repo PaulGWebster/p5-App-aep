@@ -418,10 +418,7 @@ exit do
 {
     my ( $exit_code, $exit_reason ) = main( $opt, $usage );
 
-    if (   ( !defined $exit_code )
-        || ( $exit_code !~ m#^\d+$# )
-        || ( $exit_code > 255 )
-        || ( $exit_code < 0 ) )
+    if ( ( !defined $exit_code ) || ( $exit_code !~ m#^\d+$# ) || ( $exit_code > 255 ) || ( $exit_code < 0 ) )
     {
         $exit_code = 255;
     }
