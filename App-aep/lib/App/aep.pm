@@ -311,26 +311,19 @@ sub scheduler
 #   # warn "$$: Child $pid exited";
 # }
 
+__END__
+
 =head1 SYNOPSIS
 
 =for comment Brief examples of using the module.
 
-    From within your dockerfile, simply use cpan or cpanm to add App::aep
-
-    It should then be possible to use 'aep' as the entrypoint in the dockerfile
-
-    Please see the EXAMPLES section for a small dockerfile to create a working 
-    example
+    shell$ aep --help
 
 =head1 DESCRIPTION
 
 =for comment The module's description.
 
-This app is a dynamic entry point for use in container systems such as docker, 
-unlike most perl modules, this has been created to correctly react to signals
-so it will respond correctly.
-
-Signals passed to this entrypoint will also be passed down to the child.
+You are reading the wrong documentation, please refer to L<>
 
 =head1 ARGUMENTS
 
