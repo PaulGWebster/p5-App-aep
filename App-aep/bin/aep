@@ -365,8 +365,8 @@ sub _default_opt_lookup ( $def_opt_name )
 
 sub _check_exists ( $val )
 {
-    if ( $val ne '$unset' ) { $val ? -e $val : undef }
-    else                    { 1 }
+    if ( $val ne '$unset' ) { return $val ? -e $val : undef }
+    else                    { return 1 }
 }
 
 sub _check_positive_number ( $val )
