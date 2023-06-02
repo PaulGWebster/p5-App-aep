@@ -350,7 +350,7 @@ sub _check_exists($val) {
 }
 
 sub _check_positive_number($val) {
-    ($val >= 0) ? 1 : undef
+    return ($val >= 0) ? 1 : undef
 }
 
 # Show debug messages
@@ -385,6 +385,8 @@ sub _func_debug($pipe,$line,$message) {
             say STDERR ' 'x$left_buffer_size,$out_msg;
         }
     }
+
+    return;
 }
 
 # Call the main function with selected options
