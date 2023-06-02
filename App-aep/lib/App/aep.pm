@@ -11,6 +11,10 @@ use strict;
 use utf8;
 use v5.28;
 
+# Core - Modules
+use Socket;
+use Env qw(PATH HOME TERM);
+
 # Core - Experimental (stable)
 use experimental 'signatures';
 
@@ -19,7 +23,7 @@ use Data::Dumper;
 use Carp qw(cluck longmess shortmess);
 
 # External
-use POE qw(Session::PlainCall);
+use POE qw(Session::PlainCall Wheel::SocketFactory Wheel::ReadWrite);
 use Try::Tiny;
 
 # create a new blessed object, we will carry any passed arguments forward.
@@ -27,6 +31,7 @@ sub new ($class, @args) {
     my $self = bless {
         '_passed_args'  =>  $args[0]->{'_passed_args'},
     }, $class;
+    return $self;
 }
 
 # POE::Kernel's _start, in this case it also tells the kernel to capture signals
@@ -35,6 +40,9 @@ sub _start ($self,@args) {
     poe->kernel->sig( TERM  => 'sig_term' );
     poe->kernel->sig( CHLD  => 'sig_chld' );
     poe->kernel->sig( USR   => 'sig_usr' );
+
+    #say STDERR Dumper poe->heap;
+
 
     my $debug = poe->heap->{'_'}->{'debug'};
     $debug->(
@@ -56,8 +64,113 @@ sub _start ($self,@args) {
             'Would spawn a unix socket client to try talk to instance.'
         );
     }
+    else {
+        poe->heap->{'services'}->{'unixsocket'} = POE::Session::PlainCall->create(
+            'object_states'        =>  [
+               App::aep->new() => {
+                    '_start'                        =>  'unixsocket_server_start',
+                    'unixsocket_client_connected'   =>  'unixsocket_client_connected',
+                    'unixsocket_server_error'       =>  'unixsocket_server_error',
+                    'unixsocket_client_input'       =>  'unixsocket_client_input',
+                    'unixsocket_client_error'       =>  'unixsocket_client_error'
+               },
+            ],
+            'heap'  =>  poe->heap,
+        );
+    }
 
     poe->kernel->yield( 'scheduler' );
+}
+
+sub unixsocket_server_start {
+    my $socket_path = poe->heap->{'_'}->{'config'}->{'AEP_SOCKETPATH'};
+    poe->heap->{'unixsocket'}->{'socket_path'} = $socket_path;
+
+    if (-e $socket_path) {
+        unlink $socket_path;
+    }
+
+    poe->heap->{'unixsocket'}->{'server'} = POE::Wheel::SocketFactory->new(
+        'SocketDomain'  =>  PF_UNIX,
+        'BindAddress'   =>  $socket_path,
+        'SuccessEvent'  =>  'unixsocket_client_connected',
+        'FailureEvent'  =>  'unixsocket_server_error',
+    );
+
+    return;
+}
+
+sub unixsocket_server_error ($self, $syscall, $errno, $error, $wid) {
+    my $debug = poe->heap->{'_'}->{'debug'};
+
+    if (!$errno) {
+        $error = "Normal disconnection.";
+    }
+
+    $debug->(
+        'STDERR',
+        __LINE__,
+        "Server socket encountered $syscall error $errno: $error"
+    );
+
+    delete poe->heap->{'unixsocket'}->{'server'};
+    return;
+}
+
+sub unixsocket_client_connected($self,$socket,@args) {
+    # Generate an ID we can use
+    my $client_id   = poe->heap->{'unixsocket'}->{'client'}->{'id'}++;
+    # Store the socket within it so it cannot go out of scope
+    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'socket'} = $socket;
+
+    # Create a rw_wheel to deal with the client
+    my $rw_wheel = POE::Wheel::ReadWrite->new(
+        'Handle'     => $socket,
+        'InputEvent' => 'unixsocket_client_input',
+        'ErrorEvent' => 'unixsocket_client_error',
+    );
+
+    # Store the wheel next to the socket
+    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'wheel'} = $rw_wheel;
+    # Create a mapping from the wheelid to the client
+    poe->heap->{'unixsocket'}->{'client'}->{'cid2wid'}->{$client_id} = $rw_wheel->ID;
+    # And the other way
+    poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{$rw_wheel->ID} = $client_id;
+    # Also make a note under the obj, for cleaning up
+    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'wid'} = $rw_wheel->ID;
+
+    # Send a message to the connected client
+    $rw_wheel->put(
+        "Welcome to the Unix Socket Server.",
+        "I will reverse what you type and echo it back."
+    );
+
+    return;
+}
+
+sub unixsocket_client_input($self,$input,$wid) {
+    my $cid     =   poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{$wid};
+    my $wheel   =   poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$cid}->{'wheel'};
+    $input = reverse($input);
+    $wheel->put($input);
+    return;
+}
+
+sub unixsocket_client_error($self, $syscall, $errno, $error, $wid) {
+    my $cid     =   poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{$wid};
+    my $debug   =   poe->heap->{'_'}->{'debug'};
+
+    if (!$errno) {
+        $error = "Normal disconnection for wheel: $wid, cid: $cid";
+    }
+
+    $debug->(
+        'STDERR',
+        __LINE__,
+        "Server session encountered $syscall error $errno: $error"
+    );
+
+    return;
 }
 
 sub sig_int {
@@ -109,7 +222,7 @@ sub sig_usr {
     );
 }
 sub scheduler {
-    if (poe->heap->{'exit'}++ >= 2) {
+    if (poe->heap->{'exit'}++ >= 2000) {
         poe->heap->{'_'}->{'set_exit'}->('0','test');
         #poe->kernel->yield('set_exit',0,'test');
     }
