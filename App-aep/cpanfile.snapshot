@@ -124,6 +124,22 @@ DISTRIBUTIONS
       perl 5.006
       strict 0
       warnings 0
+  Cpanel-JSON-XS-4.36
+    pathname: R/RU/RURBAN/Cpanel-JSON-XS-4.36.tar.gz
+    provides:
+      Cpanel::JSON::XS 4.36
+      Cpanel::JSON::XS::Type undef
+    requirements:
+      Carp 0
+      Config 0
+      Encode 1.9801
+      Exporter 0
+      ExtUtils::MakeMaker 0
+      Pod::Text 2.08
+      XSLoader 0
+      overload 0
+      strict 0
+      warnings 0
   Data-OptList-0.112
     pathname: R/RJ/RJBS/Data-OptList-0.112.tar.gz
     provides:
@@ -277,6 +293,17 @@ DISTRIBUTIONS
       ExtUtils::MakeMaker 0
       Test::More 0.31
       Time::HiRes 0
+  JSON-MaybeXS-1.004005
+    pathname: E/ET/ETHER/JSON-MaybeXS-1.004005.tar.gz
+    provides:
+      JSON::MaybeXS 1.004005
+    requirements:
+      Carp 0
+      Cpanel::JSON::XS 2.3310
+      ExtUtils::MakeMaker 0
+      JSON::PP 2.27300
+      Scalar::Util 0
+      perl 5.006
   Menlo-1.9019
     pathname: M/MI/MIYAGAWA/Menlo-1.9019.tar.gz
     provides:
@@ -476,6 +503,14 @@ DISTRIBUTIONS
       Storable 2.16
       Test::Harness 2.26
       Time::HiRes 1.59
+  POE-Filter-JSONMaybeXS-0.002
+    pathname: G/GE/GETTY/POE-Filter-JSONMaybeXS-0.002.tar.gz
+    provides:
+      POE::Filter::JSONMaybeXS 0.002
+    requirements:
+      ExtUtils::MakeMaker 0
+      JSON::MaybeXS 0
+      POE 0
   POE-Session-PlainCall-0.0301
     pathname: G/GW/GWYN/POE-Session-PlainCall-0.0301.tar.gz
     provides:
