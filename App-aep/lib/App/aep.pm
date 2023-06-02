@@ -34,13 +34,15 @@ use Try::Tiny;
 our $VERSION = '0.010';
 
 # create a new blessed object, we will carry any passed arguments forward.
-sub new ( $class, @args ) {
-    my $self = bless { '_passed_args' => $args[0]->{'_passed_args'}, }, $class;
+sub new ( $class, @args )
+{
+    my $self = bless { '_passed_args' => $args[ 0 ]->{ '_passed_args' }, }, $class;
     return $self;
 }
 
 # POE::Kernel's _start, in this case it also tells the kernel to capture signals
-sub _start ( $self, @args ) {
+sub _start ( $self, @args )
+{
     poe->kernel->sig( INT  => 'sig_int' );
     poe->kernel->sig( TERM => 'sig_term' );
     poe->kernel->sig( CHLD => 'sig_chld' );
@@ -48,54 +50,53 @@ sub _start ( $self, @args ) {
 
     #say STDERR Dumper poe->heap;
 
-    my $debug = poe->heap->{'_'}->{'debug'};
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
     $debug->( 'STDERR', __LINE__, 'Signals(INT,TERM,CHLF,USR) trapped.' );
 
     # What command are we meant to be running?
-    my $opt = poe->heap->{'_'}->{'opt'};
+    my $opt = poe->heap->{ '_' }->{ 'opt' };
 
     #say STDERR Dumper $opt;
 
     # Are we doing a docker check?
     # TODO
-    if ( $opt->docker_health_check ) {
-        $debug->(
-            'STDERR', __LINE__,
-            'Would spawn a unix socket client to try talk to instance.'
-        );
+    if ( $opt->docker_health_check )
+    {
+        $debug->( 'STDERR', __LINE__, 'Would spawn a unix socket client to try talk to instance.' );
     }
-    else {
-        poe->heap->{'services'}->{'unixsocket'} =
-          POE::Session::PlainCall->create(
+    else
+    {
+        poe->heap->{ 'services' }->{ 'unixsocket' } = POE::Session::PlainCall->create(
             'object_states' => [
                 App::aep->new() => {
                     '_start'                      => 'unixsocket_server_start',
-                    'unixsocket_client_connected' =>
-                      'unixsocket_client_connected',
-                    'unixsocket_server_error' => 'unixsocket_server_error',
-                    'unixsocket_client_input' => 'unixsocket_client_input',
-                    'unixsocket_client_error' => 'unixsocket_client_error',
-                    'unixsocket_server_send'  => 'unixsocket_server_send'
+                    'unixsocket_client_connected' => 'unixsocket_client_connected',
+                    'unixsocket_server_error'     => 'unixsocket_server_error',
+                    'unixsocket_client_input'     => 'unixsocket_client_input',
+                    'unixsocket_client_error'     => 'unixsocket_client_error',
+                    'unixsocket_server_send'      => 'unixsocket_server_send'
                 },
             ],
             'heap' => poe->heap,
-          );
+        );
     }
 
-    poe->kernel->yield('scheduler');
+    poe->kernel->yield( 'scheduler' );
 
     return;
 }
 
-sub unixsocket_server_start {
-    my $socket_path = poe->heap->{'_'}->{'config'}->{'AEP_SOCKETPATH'};
-    poe->heap->{'unixsocket'}->{'socket_path'} = $socket_path;
+sub unixsocket_server_start
+{
+    my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
+    poe->heap->{ 'unixsocket' }->{ 'socket_path' } = $socket_path;
 
-    if ( -e $socket_path ) {
+    if ( -e $socket_path )
+    {
         unlink $socket_path;
     }
 
-    poe->heap->{'unixsocket'}->{'server'} = POE::Wheel::SocketFactory->new(
+    poe->heap->{ 'unixsocket' }->{ 'server' } = POE::Wheel::SocketFactory->new(
         'SocketDomain' => PF_UNIX,
         'BindAddress'  => $socket_path,
         'SuccessEvent' => 'unixsocket_client_connected',
@@ -105,33 +106,32 @@ sub unixsocket_server_start {
     return;
 }
 
-sub unixsocket_server_error ( $self, $syscall, $errno, $error, $wid ) {
-    my $debug = poe->heap->{'_'}->{'debug'};
+sub unixsocket_server_error ( $self, $syscall, $errno, $error, $wid )
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
 
-    if ( !$errno ) {
+    if ( !$errno )
+    {
         $error = "Normal disconnection.";
     }
 
-    $debug->(
-        'STDERR', __LINE__,
-        "Server socket encountered $syscall error $errno: $error"
-    );
+    $debug->( 'STDERR', __LINE__, "Server socket encountered $syscall error $errno: $error" );
 
-    delete poe->heap->{'unixsocket'}->{'server'};
+    delete poe->heap->{ 'unixsocket' }->{ 'server' };
     return;
 }
 
-sub unixsocket_client_connected ( $self, $socket, @args ) {
+sub unixsocket_client_connected ( $self, $socket, @args )
+{
 
     # Generate an ID we can use
-    my $client_id = poe->heap->{'unixsocket'}->{'client'}->{'id'}++;
+    my $client_id = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'id' }++;
 
     # Store the socket within it so it cannot go out of scope
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'socket'} =
-      $socket;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'socket' } = $socket;
 
     # Send a debug message for the event of a client connecting
-    my $debug = poe->heap->{'_'}->{'debug'};
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
     $debug->( 'STDERR', __LINE__, "Client connected." );
 
     # Create a stackable filter so we can talk in json
@@ -147,30 +147,24 @@ sub unixsocket_client_connected ( $self, $socket, @args ) {
     );
 
     # Store the wheel next to the socket
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'wheel'} =
-      $rw_wheel;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wheel' } = $rw_wheel;
 
     # Store the filter so it never falls out of scope
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'filter'} =
-      $filter;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'filter' } = $filter;
 
     # Store tx/rx about the connection
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'tx_count'}
-      = 0;
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'rx_count'}
-      = 0;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'tx_count' } = 0;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'rx_count' } = 0;
 
     # Create a mapping from the wheelid to the client
-    poe->heap->{'unixsocket'}->{'client'}->{'cid2wid'}->{$client_id} =
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'cid2wid' }->{ $client_id } =
       $rw_wheel->ID;
 
     # And the other way
-    poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{ $rw_wheel->ID } =
-      $client_id;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $rw_wheel->ID } = $client_id;
 
     # Also make a note under the obj, for cleaning up
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$client_id}->{'wid'} =
-      $rw_wheel->ID;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wid' } = $rw_wheel->ID;
 
     # Send a message to the connected client
     my $msg = { 'event' => 'hello' };
@@ -179,39 +173,40 @@ sub unixsocket_client_connected ( $self, $socket, @args ) {
     return;
 }
 
-sub unixsocket_server_send ( $self, $cid, $pkt ) {
-    my $debug = poe->heap->{'_'}->{'debug'};
+sub unixsocket_server_send ( $self, $cid, $pkt )
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
 
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$cid}->{'tx_count'}++;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'tx_count' }++;
 
-    my $wheel =
-      poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$cid}->{'wheel'};
+    my $wheel = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
 
     # Format the packet, should be small
-    my $packet = Dumper($pkt);
+    my $packet = Dumper( $pkt );
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
     $debug->( 'STDERR', __LINE__, "Client($cid) TX: $packet" );
 
-    $wheel->put($pkt);
+    $wheel->put( $pkt );
 
     return;
 }
 
-sub unixsocket_client_input ( $self, $input, $wid ) {
-    my $cid   = poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{$wid};
-    my $debug = poe->heap->{'_'}->{'debug'};
+sub unixsocket_client_input ( $self, $input, $wid )
+{
+    my $cid =
+      poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
 
     # Increment the received packet count
-    poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$cid}->{'rx_count'}++;
+    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'rx_count' }++;
 
     # Shortcut to the wheel the client is connected to
-    my $wheel =
-      poe->heap->{'unixsocket'}->{'client'}->{'obj'}->{$cid}->{'wheel'};
+    my $wheel = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
 
     # Format the packet, should be small
-    my $packet = Dumper($input);
+    my $packet = Dumper( $input );
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
@@ -220,30 +215,30 @@ sub unixsocket_client_input ( $self, $input, $wid ) {
     return;
 }
 
-sub unixsocket_client_error ( $self, $syscall, $errno, $error, $wid ) {
-    my $cid   = poe->heap->{'unixsocket'}->{'client'}->{'wid2cid'}->{$wid};
-    my $debug = poe->heap->{'_'}->{'debug'};
+sub unixsocket_client_error ( $self, $syscall, $errno, $error, $wid )
+{
+    my $cid =
+      poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
 
-    if ( !$errno ) {
+    if ( !$errno )
+    {
         $error = "Normal disconnection for wheel: $wid, cid: $cid";
     }
 
-    $debug->(
-        'STDERR', __LINE__,
-        "Server session encountered $syscall error $errno: $error"
-    );
+    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
 
     return;
 }
 
-sub sig_int {
+sub sig_int
+{
 
     # Set an appropriate exit
-    poe->heap->{'_'}->{'set_exit'}->( '1', 'sigint' );
+    poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'sigint' );
 
     # Announce the event
-    poe->heap->{'_'}->{'debug'}
-      ->( 'STDERR', __LINE__, 'Signal: INT - starting controlled shutdown.' );
+    poe->heap->{ '_' }->{ 'debug' }->( 'STDERR', __LINE__, 'Signal: INT - starting controlled shutdown.' );
 
     # Tell the kernel to ignore the term we are handling it
     poe->kernel->sig_handled();
@@ -256,14 +251,14 @@ sub sig_int {
     return;
 }
 
-sub sig_term {
+sub sig_term
+{
 
     # Set an appropriate exit
-    poe->heap->{'_'}->{'set_exit'}->( '1', 'sigterm' );
+    poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'sigterm' );
 
     # Announce the event
-    poe->heap->{'_'}->{'debug'}
-      ->( 'STDERR', __LINE__, 'Signal: TERM - starting controlled shutdown.' );
+    poe->heap->{ '_' }->{ 'debug' }->( 'STDERR', __LINE__, 'Signal: TERM - starting controlled shutdown.' );
 
     # Tell the kernel to ignore the term we are handling it
     poe->kernel->sig_handled();
@@ -276,30 +271,34 @@ sub sig_term {
     return;
 }
 
-sub sig_chld {
+sub sig_chld
+{
 
     # Announce the event
-    poe->heap->{'_'}->{'debug'}
-      ->( 'STDERR', __LINE__, 'Signal CHLD, ignoring' );
+    poe->heap->{ '_' }->{ 'debug' }->( 'STDERR', __LINE__, 'Signal CHLD, ignoring' );
 
     return;
 }
 
-sub sig_usr {
+sub sig_usr
+{
 
     # Announce the event
-    poe->heap->{'_'}->{'debug'}->( 'STDERR', __LINE__, 'Signal USR, ignoring' );
+    poe->heap->{ '_' }->{ 'debug' }->( 'STDERR', __LINE__, 'Signal USR, ignoring' );
 
     return;
 }
 
-sub scheduler {
-    if ( poe->heap->{'exit'}++ >= 2000 ) {
-        poe->heap->{'_'}->{'set_exit'}->( '0', 'test' );
+sub scheduler
+{
+    if ( poe->heap->{ 'exit' }++ >= 2000 )
+    {
+        poe->heap->{ '_' }->{ 'set_exit' }->( '0', 'test' );
 
         #poe->kernel->yield('set_exit',0,'test');
     }
-    else {
+    else
+    {
         poe->kernel->delay_add( 'scheduler' => 1 );
     }
 
