@@ -56,25 +56,33 @@ sub _start ( $self, @args )
     # What command are we meant to be running?
     my $opt = poe->heap->{ '_' }->{ 'opt' };
 
-    #say STDERR Dumper $opt;
-
-    # Are we doing a docker check?
-    # TODO
-    if ( $opt->docker_health_check )
+    if ( $opt->docker_health_check || $opt->lock_client )
     {
-        $debug->( 'STDERR', __LINE__, 'Would spawn a unix socket client to try talk to instance.' );
-    }
-    else
-    {
-        poe->heap->{ 'services' }->{ 'unixsocket' } = POE::Session::PlainCall->create(
+        poe->heap->{ 'services' }->{ 'afunixcli' } = POE::Session::PlainCall->create(
             'object_states' => [
                 App::aep->new() => {
-                    '_start'                      => 'unixsocket_server_start',
-                    'unixsocket_client_connected' => 'unixsocket_client_connected',
-                    'unixsocket_server_error'     => 'unixsocket_server_error',
-                    'unixsocket_client_input'     => 'unixsocket_client_input',
-                    'unixsocket_client_error'     => 'unixsocket_client_error',
-                    'unixsocket_server_send'      => 'unixsocket_server_send'
+                    '_start'                     => 'afunixcli_client_start',
+                    'afunixcli_server_connected' => 'afunixcli_server_connected',
+                    'afunixcli_client_error'     => 'afunixcli_client_error',
+                    'afunixcli_server_input'     => 'afunixcli_server_input',
+                    'afunixcli_server_error'     => 'afunixcli_server_error',
+                    'afunixcli_client_send'      => 'afunixcli_client_send',
+                },
+            ],
+            'heap' => poe->heap,
+        );
+    }
+    elsif ( $opt->lock_server )
+    {
+        poe->heap->{ 'services' }->{ 'afunixsrv' } = POE::Session::PlainCall->create(
+            'object_states' => [
+                App::aep->new() => {
+                    '_start'                     => 'afunixsrv_server_start',
+                    'afunixsrv_client_connected' => 'afunixsrv_client_connected',
+                    'afunixsrv_server_error'     => 'afunixsrv_server_error',
+                    'afunixsrv_client_input'     => 'afunixsrv_client_input',
+                    'afunixsrv_client_error'     => 'afunixsrv_client_error',
+                    'afunixsrv_server_send'      => 'afunixsrv_server_send'
                 },
             ],
             'heap' => poe->heap,
@@ -86,27 +94,53 @@ sub _start ( $self, @args )
     return;
 }
 
-sub unixsocket_server_start
+# As server
+sub afunixsrv_server_start
 {
     my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
-    poe->heap->{ 'unixsocket' }->{ 'socket_path' } = $socket_path;
+    poe->heap->{ 'afunixsrv' }->{ 'socket_path' } = $socket_path;
 
     if ( -e $socket_path )
     {
         unlink $socket_path;
     }
 
-    poe->heap->{ 'unixsocket' }->{ 'server' } = POE::Wheel::SocketFactory->new(
+    poe->heap->{ 'afunixsrv' }->{ 'server' } = POE::Wheel::SocketFactory->new(
         'SocketDomain' => PF_UNIX,
         'BindAddress'  => $socket_path,
-        'SuccessEvent' => 'unixsocket_client_connected',
-        'FailureEvent' => 'unixsocket_server_error',
+        'SuccessEvent' => 'afunixsrv_client_connected',
+        'FailureEvent' => 'afunixsrv_server_error',
     );
 
     return;
 }
 
-sub unixsocket_server_error ( $self, $syscall, $errno, $error, $wid )
+# As client
+sub afunixcli_client_start
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
+    poe->heap->{ 'afunixcli' }->{ 'socket_path' } = $socket_path;
+
+    if ( !-e $socket_path )
+    {
+        $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, refusing to continue." );
+        die;
+    }
+
+    poe->heap->{ 'afunixsrv' }->{ 'server' } = POE::Wheel::SocketFactory->new(
+        'SocketDomain'  => PF_UNIX,
+        'RemoteAddress' => $socket_path,
+        'SuccessEvent'  => 'afunixcli_server_connected',
+        'FailureEvent'  => 'afunixcli_client_error',
+    );
+
+    return;
+}
+
+# As server
+sub afunixsrv_server_error ( $self, $syscall, $errno, $error, $wid )
 {
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
@@ -115,20 +149,37 @@ sub unixsocket_server_error ( $self, $syscall, $errno, $error, $wid )
         $error = "Normal disconnection.";
     }
 
-    $debug->( 'STDERR', __LINE__, "Server socket encountered $syscall error $errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Server AA socket encountered $syscall error $errno: $error" );
 
-    delete poe->heap->{ 'unixsocket' }->{ 'server' };
+    delete poe->heap->{ 'services' }->{ 'afunixsrv' };
     return;
 }
 
-sub unixsocket_client_connected ( $self, $socket, @args )
+# As client
+sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    if ( !$errno )
+    {
+        $error = "Normal disconnection.";
+    }
+
+    $debug->( 'STDERR', __LINE__, "Client socket encountered $syscall error $errno: $error" );
+
+    delete poe->heap->{ 'services' }->{ 'afunixcli' };
+    return;
+}
+
+# As server
+sub afunixsrv_client_connected ( $self, $socket, @args )
 {
 
     # Generate an ID we can use
-    my $client_id = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'id' }++;
+    my $client_id = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'id' }++;
 
     # Store the socket within it so it cannot go out of scope
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'socket' } = $socket;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'socket' } = $socket;
 
     # Send a debug message for the event of a client connecting
     my $debug = poe->heap->{ '_' }->{ 'debug' };
@@ -142,43 +193,83 @@ sub unixsocket_client_connected ( $self, $socket, @args )
     my $rw_wheel = POE::Wheel::ReadWrite->new(
         'Handle'     => $socket,
         'Filter'     => $filter,
-        'InputEvent' => 'unixsocket_client_input',
-        'ErrorEvent' => 'unixsocket_client_error',
+        'InputEvent' => 'afunixsrv_client_input',
+        'ErrorEvent' => 'afunixsrv_client_error',
     );
 
     # Store the wheel next to the socket
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wheel' } = $rw_wheel;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wheel' } = $rw_wheel;
 
     # Store the filter so it never falls out of scope
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'filter' } = $filter;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'filter' } = $filter;
 
     # Store tx/rx about the connection
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'tx_count' } = 0;
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'rx_count' } = 0;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'tx_count' } = 0;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'rx_count' } = 0;
 
     # Create a mapping from the wheelid to the client
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'cid2wid' }->{ $client_id } = $rw_wheel->ID;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'cid2wid' }->{ $client_id } = $rw_wheel->ID;
 
     # And the other way
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $rw_wheel->ID } = $client_id;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'wid2cid' }->{ $rw_wheel->ID } = $client_id;
 
     # Also make a note under the obj, for cleaning up
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wid' } = $rw_wheel->ID;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wid' } = $rw_wheel->ID;
 
     # Send a message to the connected client
     my $msg = { 'event' => 'hello' };
-    poe->kernel->yield( 'unixsocket_server_send', $client_id, $msg );
+    poe->kernel->yield( 'afunixsrv_server_send', $client_id, $msg );
 
     return;
 }
 
-sub unixsocket_server_send ( $self, $cid, $pkt )
+# As client
+sub afunixcli_server_connected ( $self, $socket, @args )
+{
+    # Store the socket within it so it cannot go out of scope
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'obj' } = $socket;
+
+    # Send a debug message for the event of a client connecting
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+    $debug->( 'STDERR', __LINE__, "Server connected." );
+
+    # Create a stackable filter so we can talk in json
+    my $filter = POE::Filter::Stackable->new();
+    $filter->push( POE::Filter::Line->new(), POE::Filter::JSONMaybeXS->new(), );
+
+    # Create a rw_wheel to deal with the client
+    my $rw_wheel = POE::Wheel::ReadWrite->new(
+        'Handle'     => $socket,
+        'Filter'     => $filter,
+        'InputEvent' => 'afunixcli_server_input',
+        'ErrorEvent' => 'afunixcli_server_error',
+    );
+
+    # Store the wheel next to the socket
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'wheel' } = $rw_wheel;
+
+    # Store the filter so it never falls out of scope
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'filter' } = $filter;
+
+    # Store tx/rx about the connection
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'tx_count' } = 0;
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'rx_count' } = 0;
+
+    # Send a message to the connected client
+    my $msg = { 'event' => 'hello' };
+    poe->kernel->yield( 'afunixcli_client_send', $msg );
+
+    return;
+}
+
+# As server
+sub afunixsrv_server_send ( $self, $cid, $pkt )
 {
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'tx_count' }++;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'tx_count' }++;
 
-    my $wheel = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
+    my $wheel = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
 
     # Format the packet, should be small
     my $packet = Dumper( $pkt );
@@ -192,16 +283,38 @@ sub unixsocket_server_send ( $self, $cid, $pkt )
     return;
 }
 
-sub unixsocket_client_input ( $self, $input, $wid )
+# As client
+sub afunixcli_client_send ( $self, $pkt )
 {
-    my $cid   = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'tx_count' }++;
+
+    my $wheel = poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'wheel' };
+
+    # Format the packet, should be small
+    my $packet = Dumper( $pkt );
+    $packet =~ s#[\r\n]##g;
+    $packet =~ s#\s+# #g;
+
+    $debug->( 'STDERR', __LINE__, "Server(-) TX: $packet" );
+
+    $wheel->put( $pkt );
+
+    return;
+}
+
+# As server
+sub afunixsrv_client_input ( $self, $input, $wid )
+{
+    my $cid   = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
     # Increment the received packet count
-    poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'rx_count' }++;
+    poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'rx_count' }++;
 
     # Shortcut to the wheel the client is connected to
-    my $wheel = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
+    my $wheel = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
 
     # Format the packet, should be small
     my $packet = Dumper( $input );
@@ -213,14 +326,51 @@ sub unixsocket_client_input ( $self, $input, $wid )
     return;
 }
 
-sub unixsocket_client_error ( $self, $syscall, $errno, $error, $wid )
+# As client
+sub afunixcli_server_input ( $self, $input, $wid )
 {
-    my $cid   = poe->heap->{ 'unixsocket' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    # Increment the received packet count
+    poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'rx_count' }++;
+
+    # Shortcut to the wheel the client is connected to
+    my $wheel = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'wheel' };
+
+    # Format the packet, should be small
+    my $packet = Dumper( $input );
+    $packet =~ s#[\r\n]##g;
+    $packet =~ s#\s+# #g;
+
+    $debug->( 'STDERR', __LINE__, "Server(-) RX: $packet" );
+
+    return;
+}
+
+# As server
+sub afunixsrv_client_error ( $self, $syscall, $errno, $error, $wid )
+{
+    my $cid   = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
     my $debug = poe->heap->{ '_' }->{ 'debug' };
 
     if ( !$errno )
     {
         $error = "Normal disconnection for wheel: $wid, cid: $cid";
+    }
+
+    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
+
+    return;
+}
+
+# As client
+sub afunixcli_server_error ( $self, $syscall, $errno, $error, $wid )
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    if ( !$errno )
+    {
+        $error = "Normal disconnection for wheel: $wid";
     }
 
     $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
