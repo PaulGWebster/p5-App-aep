@@ -88,9 +88,10 @@ my @opt_desc = (
             'default' => "",
         },
     ],
+    [ 'command-norestart', 'If the command exits then do not attempt to restart it.', ],
     [
         'command-restart=i',
-        'If the command exits how many times to retry it, default 0 set to -1 for infinate',
+        'If the command exits how many times to retry it, default 0 (seconds).',
         {
             'default' => 0,
         },
@@ -105,10 +106,10 @@ my @opt_desc = (
     [],
     [
         'lock-server',
-        'Act like a lock server, this means we will expect other aeps to '
-            . 'connect to us, we in turn will say when they should actually start, '
-            . 'this is to counter-act race issues when starting multi image '
-            . 'containers such as docker-compose, default: no',
+        'Act like a lock server, this means we will expect other apps to '
+        . 'connect to us, we in turn will say when they should actually start, '
+        . 'this is to counter-act race issues when starting multi image '
+        . 'containers such as docker-compose, default: no',
         {
             'default' => 0,
         },
@@ -128,44 +129,47 @@ my @opt_desc = (
         },
     ],
     [
-        'lock-server-default-run=i',
-        'If we get sent an ID we do not know what to do with, tell it to run',
+        'lock-server-default=s',
+        'If we get sent an ID we do not know, the default action to take. '
+        . 'Valid options are: "ignore", "run" or "runlast" the default is ignore.',
         {
-            'default' => 0,
-        },
-    ],
-    [
-        'lock-server-default-ignore',
-        'If we get sent an ID we do not know what to do with, ignore it',
-        {
-            'default' => 1,
+            'default' => 'ignore',
         },
     ],
     [
         'lock-server-order',
-        'The list of ids and the order to allow them to run, allows OR || '
-            . 'operators, for example: db,redis1||redis2,redis1||redis2,nginx',
+        'The list of ids and the order to allow them to run, '
+        . 'operators, for example: db,redis1,redis2,redis3,redis4,nginx',
         {
             'default' => '',
-        },
-    ],
-    [
-        'lock-server-exhaust-action=s',
-        'What to do if all clients have been started (list end), options are: '
-            . 'exit, idle, restart or execute. The default is idle',
-        {
-            'default' => 'idle',
         },
     ],
     [],
     [
         'lock-client',
         'Become a lock client, this will mean your aep will connect to '
-            . 'another aep to learn when it should run its command.',
+        . 'another aep to learn when it should run its command.',
         {
             'default' => 0,
         },
     ],
+    [ 'lock-client-noretry', 'If the connection to a master fails, do not retry - overrides lock-client-retry', ],
+    [
+        'lock-client-retry=i',
+        'If the connection to a master fails, do not fail retry n many times, '
+        . 'if this is set to 0 it will retry infinately, defaults to: 3 (seconds)',
+        {
+            'default' => 3,
+        },
+    ],
+    [
+        'lock-client-retry-delay=i',
+        'How long to wait before retrying, default 5 (seconds)',
+        {
+            'default' => 0,
+        },
+    ],
+    [],
     [
         'lock-server-host=s',
         'What host to connect to, defaults to: aep-master',
@@ -182,7 +186,7 @@ my @opt_desc = (
     ],
     [
         'lock-trigger=s',
-        'Please read perldoc App::aep example is to large for here, default is: none:time:10000',
+        'Please read --help-confog lock-trigger, default is: none:time:10000 (milliseconds)',
         {
             'default' => 'none:time:10000'
         },
@@ -205,14 +209,7 @@ my @opt_desc = (
     [
         'help-config=s',
         'print configuration examples for: config-env, config-files, '
-            . 'config-arg or config-merge eg: help-config config-env',
-        {
-            'shortcircuit' => 1,
-        },
-    ],
-    [
-        'help-config',
-        'print configuration examples',
+        . 'config-arg, config-merge or lock-trigger eg: help-config config-env',
         {
             'shortcircuit' => 1,
         },
