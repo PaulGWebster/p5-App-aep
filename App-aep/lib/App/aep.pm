@@ -2,6 +2,8 @@
 
 package App::aep;
 
+# ABSTRACT: Allows you to run a command within a container and control its start up
+
 # Core
 use warnings;
 use strict;
