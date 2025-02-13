@@ -33,7 +33,7 @@ use POE qw(
 use Try::Tiny;
 
 # Version of this software
-our $VERSION = '0.010';
+our $VERSION = '0.011';
 
 # create a new blessed object, we will carry any passed arguments forward.
 sub new ( $class, @args )

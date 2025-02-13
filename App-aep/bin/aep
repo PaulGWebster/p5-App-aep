@@ -22,7 +22,7 @@ use Data::Dumper;
 use Carp qw(cluck longmess shortmess);
 
 # Version of this software
-our $VERSION = '0.010';
+our $VERSION = '0.011';
 
 # Config defaults
 my $opt_conf_def = { 'AEP_SOCKETPATH' => '/tmp/aep.sock', };
