@@ -475,7 +475,7 @@ __END__
 
 =for comment The module's description.
 
-You are reading the wrong documentation, please refer to L<>
+You are reading the wrong documentation; please refer to L<App::CorrectModule>.
 
 =head1 ARGUMENTS
 
