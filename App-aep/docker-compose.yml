@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  aep-master:
+    build: .
+    command:
+      - "--lock-server"
+      - "--lock-server-order=db,app"
+      - "--lock-server-exhaust-action=exit"
+    volumes:
+      - aep-socket:/tmp
+
+  db:
+    build: .
+    command:
+      - "--lock-client"
+      - "--lock-id=db"
+      - "--command=echo"
+      - "--command-args=db started"
+      - "--lock-trigger=none:time:1000"
+    volumes:
+      - aep-socket:/tmp
+    depends_on:
+      - aep-master
+
+  app:
+    build: .
+    command:
+      - "--lock-client"
+      - "--lock-id=app"
+      - "--command=echo"
+      - "--command-args=app started"
+      - "--lock-trigger=none:time:1000"
+    volumes:
+      - aep-socket:/tmp
+    depends_on:
+      - aep-master
+
+volumes:
+  aep-socket:
