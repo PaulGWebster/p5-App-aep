@@ -2,6 +2,8 @@ Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
 
+0.011     2026-04-10 16:53:01 UTC
+
 0.012     2026-04-10
   - Implemented command execution via POE::Wheel::Run
   - Implemented lock server/client protocol with ordered startup
