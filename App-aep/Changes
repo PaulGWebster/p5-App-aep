@@ -1,6 +1,8 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
+
+0.013     2026-04-10 17:38:51 UTC
   - Added TCP transport for lock server/client (--lock-server-host, --lock-server-port, --lock-transport)
   - Server now listens on both Unix socket and TCP simultaneously
   - Client supports auto, tcp, and unix transport modes with fallback
