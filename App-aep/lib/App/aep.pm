@@ -35,7 +35,7 @@ STDOUT->autoflush(1);
 STDERR->autoflush(1);
 
 # Version of this software
-our $VERSION = '0.012';
+our $VERSION = '0.011';
 
 # create a new blessed object, we will carry any passed arguments forward.
 sub new ( $class, @args )
