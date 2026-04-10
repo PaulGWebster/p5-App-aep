@@ -35,7 +35,7 @@ STDOUT->autoflush(1);
 STDERR->autoflush(1);
 
 # Version of this software
-our $VERSION = '0.011';
+our $VERSION = '0.012';
 
 # create a new blessed object, we will carry any passed arguments forward.
 sub new ( $class, @args )
@@ -1149,139 +1149,166 @@ __END__
 
 =head1 SYNOPSIS
 
-=for comment Brief examples of using the module.
+    # Standalone: run a command with restart on failure
+    shell$ aep --command /usr/bin/myapp --command-args "--foreground" --command-restart -1
 
-    shell$ aep --help
+    # Lock server: orchestrate startup order for docker-compose
+    shell$ aep --lock-server --lock-server-order "db,redis,app" \
+               --lock-server-exhaust-action exit
+
+    # Lock client: wait for permission to start
+    shell$ aep --lock-client --lock-id db --command /usr/bin/postgres \
+               --lock-trigger "both:text:ready to accept connections"
+
+    # Docker health check
+    shell$ aep --docker-health-check
 
 =head1 DESCRIPTION
-
-=for comment The module's description.
 
 AEP (Advanced Entry Point) is a container entrypoint tool that runs commands
 within Docker containers and provides a lock server/client mechanism for
 orchestrating multi-container startup order.
 
+In multi-container environments (docker-compose, Kubernetes pods), services
+often start simultaneously but depend on each other. AEP solves this by
+providing a lock server that controls the order in which services start,
+waiting for each service to report readiness before allowing the next to begin.
+
+AEP communicates between containers over a Unix domain socket using a JSON
+protocol. It supports five trigger types for detecting when a service is
+ready: time delay, text match, regex match, TCP connect probe, and external
+script.
+
 =head1 ARGUMENTS
 
-=head2 config related
+=head2 Config related
 
 =head3 config-env
 
 Default value: disabled
 
-Only read command line options from the environment
+Only read configuration from environment variables.
 
 =head3 config-file
 
 Default value: disabled
 
-Only read command line options from the environment
+Read configuration from a YAML file.
 
 =head3 config-args
 
 Default value: disabled
 
-Only listen to command line arguments
+Only read configuration from command line arguments.
 
 =head3 config-merge (default)
 
 Default value: enabled
 
-Merge together env, config and args to generate a config
+Merge together env, config file and args to generate the final configuration.
 
 =head3 config-order (default)
 
-Default value: 'env,conf,args' (left to right)
+Default value: 'env,file,args' (left to right)
 
-The order to merge options together,
+The order to merge configuration sources. Later sources override earlier ones.
 
-=head2 environment related
+=head2 Environment related
 
 =head3 env-prefix (default)
 
 Default value: AEP_
 
-When scanning the environment aep will look for this prefix to know which
-environment variables it should pay attention to.
+When scanning the environment, aep will look for this prefix to identify
+which environment variables it should use as configuration. For example,
+setting C<AEP_SOCKETPATH=/var/run/aep.sock> overrides the default socket path.
 
 =head2 Command related (what to run)
 
 =head3 command (string)
 
-What to actually run within the container, default is print aes help.
+What to actually run within the container. Default is C<aep --help>.
 
 =head3 command-args (string)
 
-The arguments to add to the command comma seperated, default is nothing.
+The arguments to add to the command, comma separated. Default is nothing.
 
-Example: --list,--as-service,--with-long "arg",--foreground
+Example: C<--list,--as-service,--with-long "arg",--foreground>
+
+=head3 command-norestart
+
+If the command exits, do not attempt to restart it. Exit immediately.
 
 =head3 command-restart (integer)
 
-If the command exits how many times to retry it, default 0 set to -1 for infinate
+If the command exits, how many times to retry it. Default 0. Set to -1 for
+infinite restarts.
 
 =head3 command-restart-delay (integer)
 
-The time in milliseconds to wait before retrying the command, default 1000
+The time in milliseconds to wait before retrying the command. Default 1000.
 
 =head2 Lock commands (server)
 
-These are for if you have concerns of 'race' conditions.
+These options control the lock server, which orchestrates the startup order
+of multiple containers to prevent race conditions.
 
 =head3 lock-server
 
 Default value: disabled
 
-Act like a lock server, this means we will expect other aeps to connect to us,
-we in turn will say when they should actually start, this is to counter-act
-race issues when starting multi image containers such as docker-compose.
+Act as a lock server. Other aep instances (lock clients) will connect and
+wait for permission to start their commands.
 
 =head3 lock-server-host (string)
 
-What host to bind to, defaults to 0.0.0.0
+What host to bind to. Defaults to 0.0.0.0.
 
 =head3 lock-server-port (integer)
 
-What port to bind to, defaults to 60000
+What port to bind to. Defaults to 60000.
 
 =head3 lock-server-default (string)
 
 Default value: ignore
 
-If we get sent an ID we do not know what to do with, the action to take.
-Valid options are: "ignore", "run" or "runlast".
+If a client connects with a lock-id not in the order list, what action to take.
+
+=over 4
+
+=item * ignore - Do not send a run signal. The client will wait indefinitely.
+
+=item * run - Immediately tell the unknown client to start.
+
+=item * runlast - Queue the client and run it after the order list is exhausted.
+
+=back
 
 =head3 lock-server-order (string)
 
-The list of ids and the order to allow them to run, allows OR || operators, for
-example: db,redis1||redis2,redis1||redis2,nginx
+The list of lock-ids and the order to allow them to run, comma separated.
 
-Beware the the lock-server-default config flag!
+Example: C<db,redis,nginx>
+
+Each entry must match a lock-id sent by a connecting client. The server
+sends a C<run> signal to each client in order, waiting for each to report
+success (via its lock-trigger) before advancing to the next.
 
 =head3 lock-server-exhaust-action (string)
 
 Default value: idle
 
-What to do if all clients have been started (list end), options are:
-
+What to do when all clients in the order list have reported success.
 
 =over 4
 
-=item *
+=item * exit - Exit with code 0.
 
-exit - Exit 0
+=item * idle - Do nothing, keep the server running.
 
-=item *
+=item * restart - Reset the order list and start the cycle again.
 
-idle - Do nothing, just sit there doing nothing
-
-=item *
-
-restart - Reset the lock-server-order list and continue operating
-
-=item *
-
-execute - Read in any passed commands and args and run them like a normal aep
+=item * execute - Start the server's own command (from --command).
 
 =back
 
@@ -1291,37 +1318,46 @@ execute - Read in any passed commands and args and run them like a normal aep
 
 Default value: disabled
 
-Become a lock client, this will mean your aep will connect to another aep to
-learn when it should run its command.
+Become a lock client. This aep will connect to a lock server and wait for
+permission to start its command.
 
 =head3 lock-client-host (string)
 
-What host to connect to, defaults to 'aep-master'
+What host to connect to. Defaults to C<aep-master> (assumes Docker DNS).
 
 =head3 lock-client-port (integer)
 
-What port to connect to, defaults to 60000
+What port to connect to. Defaults to 60000.
+
+=head3 lock-client-noretry
+
+If the connection to the lock server fails, exit immediately instead of
+retrying. Overrides lock-client-retry.
+
+=head3 lock-client-retry (integer)
+
+Maximum number of connection retry attempts. Set to 0 for infinite retries.
+Defaults to 3.
+
+=head3 lock-client-retry-delay (integer)
+
+How long to wait in seconds before retrying the connection. Defaults to 5.
 
 =head3 lock-trigger (string)
 
 Default: none:time:10000
 
-What to look for to know that our target command has executed correctly, if the
-target command dies or exits before this filter can complete, the success will
-never be reported, if you have also set restart options the lock-trigger will
-continue to try to validate the service.
+How to determine that the command started successfully. After the trigger
+fires, the client reports success to the lock server, which then allows the
+next client in the order to start.
 
-The syntax for the filters is:
+The syntax is:
 
     handle:filter:specification
 
-handle can be stderr, stdout, both or none
+C<handle> can be C<stderr>, C<stdout>, C<both>, or C<none>.
 
-So an example for a filter that will match 'now serving requests':
-
-    both:text:now serving requests
-
-Several standard filters are availible:
+Available filters:
 
 =over 4
 
@@ -1329,51 +1365,73 @@ Several standard filters are availible:
 
 time - Wait this many milliseconds and then report success.
 
-Example: none:time:2000
+Example: C<none:time:2000>
 
 =item *
 
-regex - Wait till this regex matches to report success.
+regex - Wait until this regex matches output.
 
-Example: both:regex:ok|success
-
-=item *
-
-text - Wait till this line of text is seen.
-
-Example: both:text:success
+Example: C<both:regex:ok|success>
 
 =item *
 
-script - Run a script or binary somewhere else on the system and use its exit
-code to determine success or failure.
+text - Wait until this exact text appears in output.
 
-Example: none:script:/opt/check_state
+Example: C<both:text:success>
 
 =item *
 
-connect - Try to connect to a tcp port, no data is sent and any recieved is
-ignored. Will be treated as success if the connect its self succeeds.
+script - Run an external script and use its exit code (0 = success).
+Runs with a 30-second timeout. Retries every second on failure.
 
-Example: none:connect:127.0.0.1:6767
+Example: C<none:script:/opt/check_state>
+
+=item *
+
+connect - Try to connect to a TCP host:port. No data is sent or received.
+Retries every second on failure.
+
+Example: C<none:connect:127.0.0.1:6767>
 
 =back
 
 =head3 lock-id (string)
 
-What ID we should say we are
+The identity this client reports to the lock server. Must match an entry in
+the server's C<--lock-server-order> list (unless C<--lock-server-default> is
+set to C<run> or C<runlast>).
+
+=head2 Other
+
+=head3 docker-health-check
+
+Connect to the lock server socket and return an exit code for use with
+Docker HEALTHCHECK. Returns 0 (healthy) or 1 (unhealthy).
+
+=head1 ENVIRONMENT
+
+=over 4
+
+=item AEP_SOCKETPATH
+
+Path to the Unix domain socket for lock server/client communication.
+Default: C</tmp/aep.sock>
+
+=back
 
 =head1 BUGS
 
 For any feature requests or bug reports please visit:
 
-* Github L<https://github.com/PaulGWebster/p5-App-aep>
+L<https://github.com/PaulGWebster/p5-App-aep>
 
-You may also catch up to the author 'daemon' on IRC:
+You may also find the author 'daemon' on IRC:
 
-* irc.libera.org
+=over 4
 
-* #perl
+=item * irc.libera.org #perl
+
+=back
 
 =head1 AUTHOR
 
@@ -1381,7 +1439,7 @@ Paul G Webster <daemon@cpan.org>
 
 =head1 COPYRIGHT AND LICENSE
 
-This software is copyright (c) 2023 by Paul G Webster.
+This software is copyright (c) 2023-2026 by Paul G Webster.
 
 This is free software; you can redistribute it and/or modify it under
 the same terms as the Perl 5 programming language system itself.
