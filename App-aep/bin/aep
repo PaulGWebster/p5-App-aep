@@ -21,6 +21,9 @@ use App::aep;
 use Data::Dumper;
 use Carp qw(cluck longmess shortmess);
 
+STDOUT->autoflush(1);
+STDERR->autoflush(1);
+
 # Version of this software
 our $VERSION = '0.011';
 
@@ -32,7 +35,7 @@ my @opt_desc = (
     'aep %o <some-arg>',
     [
         'config-env',
-        'Read config values from the enviroment only.',
+        'Read config values from the environment only.',
         {
             'default' => 0,
         },
@@ -71,7 +74,7 @@ my @opt_desc = (
     [],
     [
         'env-prefix=s',
-        'What prefix to look for aep config enviromentals, default is AEP_',
+        'What prefix to look for aep config environmentals, default is AEP_',
         {
             'default' => 'AEP_',
         },
@@ -180,7 +183,7 @@ my @opt_desc = (
         'lock-client-retry-delay=i',
         'How long to wait before retrying, default 5 (seconds)',
         {
-            'default' => 0,
+            'default' => 5,
         },
     ],
     [],
@@ -236,27 +239,6 @@ my @opt_desc = (
         },
     ],
 );
-my $opt_index = do
-{
-    my $opt_map;
-    my $opt_num = 0 - 1;
-    foreach my $opt_read ( @opt_desc )
-    {
-
-        # Increment out count every iteration
-        $opt_num++;
-
-        # Skip lines of text and blank arrays
-        if    ( ref( $opt_read ) ne 'ARRAY' )   { next }
-        elsif ( scalar( @{ $opt_read } ) == 0 ) { next }
-
-        # Create a map to the item
-        $opt_map->{ $opt_read->[ 0 ] } = $opt_num;
-    }
-
-    # Return the map
-    $opt_map;
-};
 # Read in our options
 my ( $opt, $usage ) = describe_options( @opt_desc );
 
@@ -319,7 +301,7 @@ sub _create_heap ( $opt, $usage )
     # As it will be accessed a lot, keep a copy here
     my $env_prefix = $opt->env_prefix;
 
-    # Collect appropriate enviromental variables and stash them in the funcmap/heap
+    # Collect appropriate environmental variables and stash them in the funcmap/heap
     foreach my $env_key ( keys %ENV )
     {
         my $env_val = $ENV{ $env_key };
@@ -384,25 +366,6 @@ sub _create_heap ( $opt, $usage )
     return $map;
 }
 
-# Helper functions for repeated calls
-sub _default_opt_lookup ( $def_opt_name )
-{
-    my $def = $opt_desc[ $opt_index->{ $def_opt_name } ];
-    if ( scalar( @{ $def } ) >= 2 )
-    {
-        $def = $def->[ 2 ];
-    }
-    if ( $def->{ 'default' } )
-    {
-        $def = $def->{ 'default' };
-    }
-    else
-    {
-        $def = 0;
-    }
-    return $def;
-}
-
 sub _check_exists ( $val )
 {
     if ( $val ne '$unset' ) { return $val ? -e $val : undef }
@@ -411,7 +374,7 @@ sub _check_exists ( $val )
 
 sub _check_positive_number ( $val )
 {
-    return ( $val >= 0 ) ? 1 : undef;
+    return ( $val >= 0 || $val == -1 ) ? 1 : undef;
 }
 
 # Show debug messages
@@ -482,7 +445,7 @@ exit do
 
 __END__
 
-# ABSTRACT: turns baubles into trinkets
+# ABSTRACT: Advanced Entry Point for container process management
 
 =head1 NAME
 

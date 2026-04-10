@@ -1,5 +1,3 @@
-#!/usr/bin/env perl
-
 package App::aep;
 
 # ABSTRACT: Allows you to run a command within a container and control its start up
@@ -12,14 +10,13 @@ use v5.28;
 
 # Core - Modules
 use Socket;
-use Env qw(PATH HOME TERM);
+use IO::Socket::INET;
 
 # Core - Experimental (stable)
 use experimental 'signatures';
 
 # Debug
 use Data::Dumper;
-use Carp qw(cluck longmess shortmess);
 
 # External
 use POE qw(
@@ -32,6 +29,10 @@ use POE qw(
     Filter::JSONMaybeXS
 );
 use Try::Tiny;
+
+# Ensure unbuffered output for container environments
+STDOUT->autoflush(1);
+STDERR->autoflush(1);
 
 # Version of this software
 our $VERSION = '0.011';
@@ -83,12 +84,13 @@ sub _start ( $self, @args )
         poe->heap->{ 'services' }->{ 'afunixcli' } = POE::Session::PlainCall->create(
             'object_states' => [
                 App::aep->new() => {
-                    '_start'                     => 'afunixcli_client_start',
-                    'afunixcli_server_connected' => 'afunixcli_server_connected',
-                    'afunixcli_client_error'     => 'afunixcli_client_error',
-                    'afunixcli_server_input'     => 'afunixcli_server_input',
-                    'afunixcli_server_error'     => 'afunixcli_server_error',
-                    'afunixcli_client_send'      => 'afunixcli_client_send',
+                    '_start'                        => 'afunixcli_client_start',
+                    'afunixcli_server_connected'    => 'afunixcli_server_connected',
+                    'afunixcli_client_error'        => 'afunixcli_client_error',
+                    'afunixcli_server_input'        => 'afunixcli_server_input',
+                    'afunixcli_server_error'        => 'afunixcli_server_error',
+                    'afunixcli_client_send'         => 'afunixcli_client_send',
+                    'afunixcli_client_reconnect'    => 'afunixcli_client_reconnect',
                 },
             ],
             'heap' => poe->heap,
@@ -181,6 +183,7 @@ sub afunixsrv_server_error ( $self, $syscall, $errno, $error, $wid )
 sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
 {
     my $debug = poe->heap->{ '_' }->{ 'debug' };
+    my $opt   = poe->heap->{ '_' }->{ 'opt' };
 
     if ( !$errno )
     {
@@ -190,6 +193,68 @@ sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
     $debug->( 'STDERR', __LINE__, "Client socket encountered $syscall error $errno: $error" );
 
     delete poe->heap->{ 'services' }->{ 'afunixcli' };
+
+    # Check if retries are disabled
+    if ( $opt->lock_client_noretry )
+    {
+        $debug->( 'STDERR', __LINE__, "lock-client-noretry is set, exiting." );
+        poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'lock-client-noretry' );
+        poe->kernel->stop();
+        return;
+    }
+
+    # Increment retry counter
+    poe->heap->{ 'afunixcli' }->{ 'retry_count' } ||= 0;
+    poe->heap->{ 'afunixcli' }->{ 'retry_count' }++;
+
+    my $max_retries = $opt->lock_client_retry || 0;
+    my $retry_count = poe->heap->{ 'afunixcli' }->{ 'retry_count' };
+
+    # 0 = infinite retries, otherwise check max
+    if ( $max_retries > 0 && $retry_count > $max_retries )
+    {
+        $debug->( 'STDERR', __LINE__, "Max retries ($max_retries) exceeded, exiting." );
+        poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'lock-client-retries-exhausted' );
+        poe->kernel->stop();
+        return;
+    }
+
+    my $delay = $opt->lock_client_retry_delay || 5;
+    $debug->( 'STDERR', __LINE__,
+        "Scheduling reconnect attempt $retry_count in ${delay}s (max: "
+        . ( $max_retries == 0 ? 'infinite' : $max_retries ) . ")." );
+    poe->kernel->delay( 'afunixcli_client_reconnect' => $delay );
+
+    return;
+}
+
+# As client - reconnect after a failed connection
+sub afunixcli_client_reconnect
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+
+    $debug->( 'STDERR', __LINE__, "Attempting lock client reconnect." );
+
+    my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
+    poe->heap->{ 'afunixcli' }->{ 'socket_path' } = $socket_path;
+
+    if ( !-e $socket_path )
+    {
+        $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, will retry." );
+        # Trigger another error/retry cycle by re-scheduling
+        my $opt   = poe->heap->{ '_' }->{ 'opt' };
+        my $delay = $opt->lock_client_retry_delay || 5;
+        poe->kernel->delay( 'afunixcli_client_reconnect' => $delay );
+        return;
+    }
+
+    poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+        'SocketDomain'  => PF_UNIX,
+        'RemoteAddress' => $socket_path,
+        'SuccessEvent'  => 'afunixcli_server_connected',
+        'FailureEvent'  => 'afunixcli_client_error',
+    );
+
     return;
 }
 
@@ -548,6 +613,25 @@ sub afunixsrv_client_error ( $self, $syscall, $errno, $error, $wid )
 
     $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
 
+    # Clean up the dead client's state
+    if ( defined $cid )
+    {
+        my $lock_id = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'lock_id' };
+
+        # Remove the lock id2cid mapping if it exists
+        if ( defined $lock_id )
+        {
+            delete poe->heap->{ 'lock' }->{ 'id2cid' }->{ $lock_id };
+        }
+
+        # Remove wid2cid and cid2wid mappings
+        delete poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'wid2cid' }->{ $wid };
+        delete poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'cid2wid' }->{ $cid };
+
+        # Delete the client's obj entry
+        delete poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid };
+    }
+
     return;
 }
 
@@ -866,13 +950,19 @@ sub lock_trigger_connect
 
     $debug->( 'STDERR', __LINE__, "Connect trigger: trying $host:$port." );
 
-    my $sock;
     my $ok = try {
-        socket( $sock, PF_INET, SOCK_STREAM, getprotobyname( 'tcp' ) ) || return 0;
-        my $addr = sockaddr_in( $port, inet_aton( $host ) );
-        connect( $sock, $addr ) || return 0;
-        close( $sock );
-        return 1;
+        my $sock = IO::Socket::INET->new(
+            PeerAddr => $host,
+            PeerPort => $port,
+            Proto    => 'tcp',
+            Timeout  => 2,
+        );
+        if ( $sock )
+        {
+            close( $sock );
+            return 1;
+        }
+        return 0;
     }
     catch {
         return 0;
@@ -904,7 +994,19 @@ sub lock_trigger_script
 
     $debug->( 'STDERR', __LINE__, "Script trigger: running '$spec'." );
 
-    my $exit_code = system( $spec );
+    # WARNING: system() blocks the event loop. Using alarm() to cap execution time.
+    my $exit_code;
+    eval {
+        local $SIG{ 'ALRM' } = sub { die "script_timeout\n" };
+        alarm( 30 );
+        $exit_code = system( $spec );
+        alarm( 0 );
+    };
+    if ( $@ )
+    {
+        $debug->( 'STDERR', __LINE__, "Script trigger: '$spec' timed out after 30s." );
+        $exit_code = -1;
+    }
 
     if ( $exit_code == 0 )
     {
@@ -943,6 +1045,10 @@ sub sig_int
     # Prevent restarts during shutdown
     poe->heap->{ 'command' }->{ 'shutting_down' } = 1;
 
+    # Clean up the unix socket file if it exists
+    my $socket_path = poe->heap->{'afunixsrv'}->{'socket_path'};
+    unlink $socket_path if $socket_path && -e $socket_path;
+
     # Stop the event wheel
     poe->kernel->stop();
 
@@ -969,6 +1075,10 @@ sub sig_term
 
     # Prevent restarts during shutdown
     poe->heap->{ 'command' }->{ 'shutting_down' } = 1;
+
+    # Clean up the unix socket file if it exists
+    my $socket_path = poe->heap->{'afunixsrv'}->{'socket_path'};
+    unlink $socket_path if $socket_path && -e $socket_path;
 
     # Stop the event wheel
     poe->kernel->stop();
@@ -1059,13 +1169,13 @@ orchestrating multi-container startup order.
 
 Default value: disabled
 
-Only read command line options from the enviroment
+Only read command line options from the environment
 
 =head3 config-file
 
 Default value: disabled
 
-Only read command line options from the enviroment
+Only read command line options from the environment
 
 =head3 config-args
 
@@ -1089,9 +1199,9 @@ The order to merge options together,
 
 =head3 env-prefix (default)
 
-Default value: aep-
+Default value: AEP_
 
-When scanning the enviroment aep will look for this prefix to know which
+When scanning the environment aep will look for this prefix to know which
 environment variables it should pay attention to.
 
 =head2 Command related (what to run)
