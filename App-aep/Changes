@@ -2,6 +2,23 @@ Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
 
+0.012     2026-04-10
+  - Implemented command execution via POE::Wheel::Run
+  - Implemented lock server/client protocol with ordered startup
+  - Added 5 lock trigger types: time, text, regex, connect, script
+  - Added config file reading (YAML) with env/file/args merge
+  - Added lock client connection retry logic
+  - Added Dockerfile (Carton-based) and docker-compose.yml
+  - Added unit tests (34 tests) and integration tests (12 tests)
+  - Fixed cross-session POE event dispatching
+  - Fixed blocking I/O in trigger connect and script handlers
+  - Fixed memory leak on client disconnect
+  - Fixed signal handlers to kill child processes and clean up sockets
+  - Fixed duplicate Getopt option specifications
+  - Removed unused imports and dead code
+  - Added STDOUT/STDERR autoflush for container environments
+  - Comprehensive POD rewrite with examples and full option documentation
+
 0.010     2025-02-13 21:54:36 GMT
   - Preparing for first release
   - Corrected POD error
