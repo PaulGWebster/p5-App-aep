@@ -25,7 +25,7 @@ STDOUT->autoflush(1);
 STDERR->autoflush(1);
 
 # Version of this software
-our $VERSION = '0.012';
+our $VERSION = '0.013';
 
 # Config defaults
 my $opt_conf_def = { 'AEP_SOCKETPATH' => '/tmp/aep.sock', };
