@@ -1,10 +1,6 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
-
-0.011     2026-04-10 16:53:01 UTC
-
-0.012     2026-04-10
   - Implemented command execution via POE::Wheel::Run
   - Implemented lock server/client protocol with ordered startup
   - Added 5 lock trigger types: time, text, regex, connect, script
@@ -20,6 +16,9 @@ Revision history for perl application aep (Advanced Entry Point)
   - Removed unused imports and dead code
   - Added STDOUT/STDERR autoflush for container environments
   - Comprehensive POD rewrite with examples and full option documentation
+
+0.011     2026-04-10 16:53:01 UTC
+  - First CPAN release with core framework
 
 0.010     2025-02-13 21:54:36 GMT
   - Preparing for first release
