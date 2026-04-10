@@ -9,7 +9,7 @@ use utf8;
 use v5.28;
 
 # Core - Modules
-use Socket;
+use Socket qw(AF_INET PF_UNIX SOCK_STREAM);
 use IO::Socket::INET;
 
 # Core - Experimental (stable)
@@ -65,12 +65,22 @@ sub _start ( $self, @args )
     if ( $opt->lock_server )
     {
         my $order_str = $opt->lock_server_order || '';
-        my @order = grep { $_ ne '' } split( /,/, $order_str );
-        poe->heap->{ 'lock' }->{ 'order' }         = \@order;
-        poe->heap->{ 'lock' }->{ 'order_idx' }     = 0;
-        poe->heap->{ 'lock' }->{ 'order_orig' }    = [ @order ];
-        poe->heap->{ 'lock' }->{ 'waiting' }       = {};
-        poe->heap->{ 'lock' }->{ 'unknown_queue' } = [];
+        my @raw_steps = grep { $_ ne '' } split( /,/, $order_str );
+
+        # Each step may contain || for parallel groups: "redis1||redis2" becomes ['redis1', 'redis2']
+        my @order;
+        for my $step_str ( @raw_steps )
+        {
+            my @ids = split( /\|\|/, $step_str );
+            push @order, \@ids;
+        }
+
+        poe->heap->{ 'lock' }->{ 'order' }          = \@order;
+        poe->heap->{ 'lock' }->{ 'order_idx' }      = 0;
+        poe->heap->{ 'lock' }->{ 'order_orig' }     = [ map { [ @{ $_ } ] } @order ];
+        poe->heap->{ 'lock' }->{ 'waiting' }        = {};
+        poe->heap->{ 'lock' }->{ 'unknown_queue' }  = [];
+        poe->heap->{ 'lock' }->{ 'step_completed' } = 0;
     }
 
     # Initialize command state
@@ -121,6 +131,9 @@ sub _start ( $self, @args )
 # As server
 sub afunixsrv_server_start
 {
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+    my $opt   = poe->heap->{ '_' }->{ 'opt' };
+
     my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
     poe->heap->{ 'afunixsrv' }->{ 'socket_path' } = $socket_path;
 
@@ -129,12 +142,28 @@ sub afunixsrv_server_start
         unlink $socket_path;
     }
 
+    # Unix domain socket listener
     poe->heap->{ 'afunixsrv' }->{ 'server' } = POE::Wheel::SocketFactory->new(
         'SocketDomain' => PF_UNIX,
         'BindAddress'  => $socket_path,
         'SuccessEvent' => 'afunixsrv_client_connected',
         'FailureEvent' => 'afunixsrv_server_error',
     );
+
+    # TCP socket listener
+    my $tcp_host = $opt->lock_server_host || '0.0.0.0';
+    my $tcp_port = $opt->lock_server_port || 60000;
+
+    poe->heap->{ 'afunixsrv' }->{ 'tcp_server' } = POE::Wheel::SocketFactory->new(
+        'SocketDomain' => AF_INET,
+        'BindAddress'  => $tcp_host,
+        'BindPort'     => $tcp_port,
+        'Reuse'        => 'yes',
+        'SuccessEvent' => 'afunixsrv_client_connected',
+        'FailureEvent' => 'afunixsrv_server_error',
+    );
+
+    $debug->( 'STDERR', __LINE__, "Lock server listening on unix:$socket_path and tcp:$tcp_host:$tcp_port" );
 
     return;
 }
@@ -143,22 +172,51 @@ sub afunixsrv_server_start
 sub afunixcli_client_start
 {
     my $debug = poe->heap->{ '_' }->{ 'debug' };
+    my $opt   = poe->heap->{ '_' }->{ 'opt' };
+
+    my $transport = $opt->lock_transport || 'auto';
 
     my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
     poe->heap->{ 'afunixcli' }->{ 'socket_path' } = $socket_path;
 
-    if ( !-e $socket_path )
+    if ( $transport eq 'tcp' || $transport eq 'auto' )
     {
-        $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, refusing to continue." );
-        die;
-    }
+        # Try TCP first (or only TCP if transport is 'tcp')
+        my $tcp_host = $opt->lock_client_host || 'aep-master';
+        my $tcp_port = $opt->lock_client_port || 60000;
 
-    poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
-        'SocketDomain'  => PF_UNIX,
-        'RemoteAddress' => $socket_path,
-        'SuccessEvent'  => 'afunixcli_server_connected',
-        'FailureEvent'  => 'afunixcli_client_error',
-    );
+        $debug->( 'STDERR', __LINE__, "Lock client connecting via TCP to $tcp_host:$tcp_port (transport=$transport)." );
+
+        poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } = 'tcp';
+
+        poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+            'SocketDomain'  => AF_INET,
+            'RemoteAddress' => $tcp_host,
+            'RemotePort'    => $tcp_port,
+            'SuccessEvent'  => 'afunixcli_server_connected',
+            'FailureEvent'  => 'afunixcli_client_error',
+        );
+    }
+    else
+    {
+        # Unix socket only
+        if ( !-e $socket_path )
+        {
+            $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, refusing to continue." );
+            die;
+        }
+
+        $debug->( 'STDERR', __LINE__, "Lock client connecting via Unix socket $socket_path." );
+
+        poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } = 'unix';
+
+        poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+            'SocketDomain'  => PF_UNIX,
+            'RemoteAddress' => $socket_path,
+            'SuccessEvent'  => 'afunixcli_server_connected',
+            'FailureEvent'  => 'afunixcli_client_error',
+        );
+    }
 
     return;
 }
@@ -173,7 +231,7 @@ sub afunixsrv_server_error ( $self, $syscall, $errno, $error, $wid )
         $error = "Normal disconnection.";
     }
 
-    $debug->( 'STDERR', __LINE__, "Server AA socket encountered $syscall error $errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Server AA socket encountered $syscall error $errno: $error", 'error' );
 
     delete poe->heap->{ 'services' }->{ 'afunixsrv' };
     return;
@@ -190,14 +248,51 @@ sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
         $error = "Normal disconnection.";
     }
 
-    $debug->( 'STDERR', __LINE__, "Client socket encountered $syscall error $errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Client socket encountered $syscall error $errno: $error", 'error' );
+
+    # If running a docker health check and connection failed, exit unhealthy
+    if ( $opt->docker_health_check )
+    {
+        $debug->( 'STDERR', __LINE__, "Health check connection failed, exiting unhealthy.", 'error' );
+        poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'health-check-failed' );
+        poe->kernel->stop();
+        return;
+    }
+
+    # Auto transport fallback: if TCP was attempted and failed, try Unix socket
+    my $transport = $opt->lock_transport || 'auto';
+    my $attempted = poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } || '';
+
+    if ( $transport eq 'auto' && $attempted eq 'tcp' )
+    {
+        my $socket_path = poe->heap->{ 'afunixcli' }->{ 'socket_path' };
+
+        if ( $socket_path && -e $socket_path )
+        {
+            $debug->( 'STDERR', __LINE__, "TCP connection failed, falling back to Unix socket $socket_path." );
+
+            poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } = 'unix';
+
+            poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+                'SocketDomain'  => PF_UNIX,
+                'RemoteAddress' => $socket_path,
+                'SuccessEvent'  => 'afunixcli_server_connected',
+                'FailureEvent'  => 'afunixcli_client_error',
+            );
+            return;
+        }
+        else
+        {
+            $debug->( 'STDERR', __LINE__, "TCP failed and Unix socket '$socket_path' does not exist." );
+        }
+    }
 
     delete poe->heap->{ 'services' }->{ 'afunixcli' };
 
     # Check if retries are disabled
     if ( $opt->lock_client_noretry )
     {
-        $debug->( 'STDERR', __LINE__, "lock-client-noretry is set, exiting." );
+        $debug->( 'STDERR', __LINE__, "lock-client-noretry is set, exiting.", 'error' );
         poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'lock-client-noretry' );
         poe->kernel->stop();
         return;
@@ -213,7 +308,7 @@ sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
     # 0 = infinite retries, otherwise check max
     if ( $max_retries > 0 && $retry_count > $max_retries )
     {
-        $debug->( 'STDERR', __LINE__, "Max retries ($max_retries) exceeded, exiting." );
+        $debug->( 'STDERR', __LINE__, "Max retries ($max_retries) exceeded, exiting.", 'error' );
         poe->heap->{ '_' }->{ 'set_exit' }->( '1', 'lock-client-retries-exhausted' );
         poe->kernel->stop();
         return;
@@ -232,28 +327,53 @@ sub afunixcli_client_error ( $self, $syscall, $errno, $error, $wid )
 sub afunixcli_client_reconnect
 {
     my $debug = poe->heap->{ '_' }->{ 'debug' };
+    my $opt   = poe->heap->{ '_' }->{ 'opt' };
 
     $debug->( 'STDERR', __LINE__, "Attempting lock client reconnect." );
 
-    my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
-    poe->heap->{ 'afunixcli' }->{ 'socket_path' } = $socket_path;
+    my $transport = $opt->lock_transport || 'auto';
 
-    if ( !-e $socket_path )
+    if ( $transport eq 'tcp' || $transport eq 'auto' )
     {
-        $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, will retry." );
-        # Trigger another error/retry cycle by re-scheduling
-        my $opt   = poe->heap->{ '_' }->{ 'opt' };
-        my $delay = $opt->lock_client_retry_delay || 5;
-        poe->kernel->delay( 'afunixcli_client_reconnect' => $delay );
-        return;
-    }
+        my $tcp_host = $opt->lock_client_host || 'aep-master';
+        my $tcp_port = $opt->lock_client_port || 60000;
 
-    poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
-        'SocketDomain'  => PF_UNIX,
-        'RemoteAddress' => $socket_path,
-        'SuccessEvent'  => 'afunixcli_server_connected',
-        'FailureEvent'  => 'afunixcli_client_error',
-    );
+        $debug->( 'STDERR', __LINE__, "Reconnecting via TCP to $tcp_host:$tcp_port." );
+
+        poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } = 'tcp';
+
+        poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+            'SocketDomain'  => AF_INET,
+            'RemoteAddress' => $tcp_host,
+            'RemotePort'    => $tcp_port,
+            'SuccessEvent'  => 'afunixcli_server_connected',
+            'FailureEvent'  => 'afunixcli_client_error',
+        );
+    }
+    else
+    {
+        my $socket_path = poe->heap->{ '_' }->{ 'config' }->{ 'AEP_SOCKETPATH' };
+        poe->heap->{ 'afunixcli' }->{ 'socket_path' } = $socket_path;
+
+        if ( !-e $socket_path )
+        {
+            $debug->( 'STDERR', __LINE__, "Control socket '$socket_path' does not exist, will retry." );
+            my $delay = $opt->lock_client_retry_delay || 5;
+            poe->kernel->delay( 'afunixcli_client_reconnect' => $delay );
+            return;
+        }
+
+        $debug->( 'STDERR', __LINE__, "Reconnecting via Unix socket $socket_path." );
+
+        poe->heap->{ 'afunixcli' }->{ 'transport_attempted' } = 'unix';
+
+        poe->heap->{ 'afunixcli' }->{ 'client' } = POE::Wheel::SocketFactory->new(
+            'SocketDomain'  => PF_UNIX,
+            'RemoteAddress' => $socket_path,
+            'SuccessEvent'  => 'afunixcli_server_connected',
+            'FailureEvent'  => 'afunixcli_client_error',
+        );
+    }
 
     return;
 }
@@ -303,9 +423,9 @@ sub afunixsrv_client_connected ( $self, $socket, @args )
     # Also make a note under the obj, for cleaning up
     poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $client_id }->{ 'wid' } = $rw_wheel->ID;
 
-    # Send a message to the connected client
+    # Send a message to the connected client (direct put, not cross-session yield)
     my $msg = { 'event' => 'hello' };
-    poe->kernel->yield( 'afunixsrv_server_send', $client_id, $msg );
+    $rw_wheel->put( $msg );
 
     return;
 }
@@ -342,10 +462,20 @@ sub afunixcli_server_connected ( $self, $socket, @args )
     poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'tx_count' } = 0;
     poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'rx_count' } = 0;
 
-    # Send our lock-id to the server so it knows who we are
-    my $opt    = poe->heap->{ '_' }->{ 'opt' };
-    my $msg    = { 'event' => 'hello', 'lock_id' => $opt->lock_id };
-    poe->kernel->yield( 'afunixcli_client_send', $msg );
+    my $opt = poe->heap->{ '_' }->{ 'opt' };
+
+    if ( $opt->docker_health_check )
+    {
+        # Health check mode: request status from server
+        my $msg = { 'event' => 'health_check' };
+        $rw_wheel->put( $msg );
+    }
+    else
+    {
+        # Send our lock-id to the server so it knows who we are
+        my $msg = { 'event' => 'hello', 'lock_id' => $opt->lock_id };
+        $rw_wheel->put( $msg );
+    }
 
     return;
 }
@@ -364,7 +494,7 @@ sub afunixsrv_server_send ( $self, $cid, $pkt )
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
-    $debug->( 'STDERR', __LINE__, "Client($cid) TX: $packet" );
+    $debug->( 'STDERR', __LINE__, "Client($cid) TX: $packet", 'debug' );
 
     $wheel->put( $pkt );
 
@@ -385,7 +515,7 @@ sub afunixcli_client_send ( $self, $pkt )
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
-    $debug->( 'STDERR', __LINE__, "Server(-) TX: $packet" );
+    $debug->( 'STDERR', __LINE__, "Server(-) TX: $packet", 'debug' );
 
     $wheel->put( $pkt );
 
@@ -410,7 +540,7 @@ sub afunixsrv_client_input ( $self, $input, $wid )
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
-    $debug->( 'STDERR', __LINE__, "Client($cid) RX: $packet" );
+    $debug->( 'STDERR', __LINE__, "Client($cid) RX: $packet", 'debug' );
 
     my $event = $input->{ 'event' } || '';
 
@@ -435,9 +565,63 @@ sub afunixsrv_client_input ( $self, $input, $wid )
         my $lock_id = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'lock_id' } || 'unknown';
         $debug->( 'STDERR', __LINE__, "Client($cid) lock-id '$lock_id' reports trigger success." );
 
-        # Advance to the next item in the order
-        poe->heap->{ 'lock' }->{ 'order_idx' }++;
-        _lock_server_check_next();
+        # Increment step_completed counter for parallel groups
+        poe->heap->{ 'lock' }->{ 'step_completed' }++;
+
+        my $order = poe->heap->{ 'lock' }->{ 'order' };
+        my $idx   = poe->heap->{ 'lock' }->{ 'order_idx' };
+
+        if ( $idx < scalar( @{ $order } ) )
+        {
+            my $step = $order->[ $idx ];
+            my @ids  = ref $step eq 'ARRAY' ? @{ $step } : ( $step );
+            my $step_size = scalar @ids;
+
+            $debug->( 'STDERR', __LINE__,
+                "Step $idx: " . poe->heap->{ 'lock' }->{ 'step_completed' } . "/$step_size completed." );
+
+            # Only advance when all IDs in the current parallel step have reported trigger_ok
+            if ( poe->heap->{ 'lock' }->{ 'step_completed' } >= $step_size )
+            {
+                poe->heap->{ 'lock' }->{ 'step_completed' } = 0;
+                poe->heap->{ 'lock' }->{ 'order_idx' }++;
+                _lock_server_check_next();
+            }
+        }
+    }
+    # Client is requesting a health check
+    elsif ( $event eq 'health_check' )
+    {
+        my $order       = poe->heap->{ 'lock' }->{ 'order' } || [];
+        my $idx         = poe->heap->{ 'lock' }->{ 'order_idx' } || 0;
+        my $total_steps = scalar @{ $order };
+
+        # Build lists of cleared and waiting IDs
+        my @cleared;
+        my @waiting;
+        for my $i ( 0 .. $#{ $order } )
+        {
+            my $step = $order->[ $i ];
+            my @ids  = ref $step eq 'ARRAY' ? @{ $step } : ( $step );
+            if ( $i < $idx )
+            {
+                push @cleared, @ids;
+            }
+            else
+            {
+                push @waiting, @ids;
+            }
+        }
+
+        my $status = {
+            'event'             => 'health_status',
+            'status'            => 'ok',
+            'clients_connected' => scalar( keys %{ poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' } || {} } ),
+            'order_progress'    => "$idx/$total_steps",
+            'cleared'           => \@cleared,
+            'waiting'           => \@waiting,
+        };
+        $wheel->put( $status );
     }
 
     return;
@@ -459,20 +643,31 @@ sub _lock_server_check_next
         return;
     }
 
-    my $next_id = $order->[ $idx ];
-    $debug->( 'STDERR', __LINE__, "Lock order: checking for next lock-id '$next_id' (index $idx)." );
+    my $step = $order->[ $idx ];
+    my @ids  = ref $step eq 'ARRAY' ? @{ $step } : ( $step );
+    my $step_label = join( '||', @ids );
+    $debug->( 'STDERR', __LINE__, "Lock order: checking step $idx [$step_label]." );
 
-    # Check if this client is already connected and waiting
-    my $cid = poe->heap->{ 'lock' }->{ 'id2cid' }->{ $next_id };
-    if ( defined $cid )
+    # For each ID in the current parallel step, send run if connected
+    for my $next_id ( @ids )
     {
-        $debug->( 'STDERR', __LINE__, "Lock-id '$next_id' is connected (cid $cid), sending run." );
-        my $msg = { 'event' => 'run' };
-        poe->kernel->yield( 'afunixsrv_server_send', $cid, $msg );
-    }
-    else
-    {
-        $debug->( 'STDERR', __LINE__, "Lock-id '$next_id' not yet connected, waiting." );
+        my $cid = poe->heap->{ 'lock' }->{ 'id2cid' }->{ $next_id };
+        if ( defined $cid )
+        {
+            # Only send run if we haven't already sent it
+            if ( !poe->heap->{ 'lock' }->{ 'run_sent' }->{ $next_id } )
+            {
+                $debug->( 'STDERR', __LINE__, "Lock-id '$next_id' is connected (cid $cid), sending run." );
+                my $msg = { 'event' => 'run' };
+                my $wheel = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
+                $wheel->put( $msg );
+                poe->heap->{ 'lock' }->{ 'run_sent' }->{ $next_id } = 1;
+            }
+        }
+        else
+        {
+            $debug->( 'STDERR', __LINE__, "Lock-id '$next_id' not yet connected, waiting." );
+        }
     }
 
     # Also process any unknown clients based on lock-server-default
@@ -489,8 +684,13 @@ sub _lock_server_process_unknown
     my $default_act = $opt->lock_server_default || 'ignore';
     my $order       = poe->heap->{ 'lock' }->{ 'order' };
 
-    # Build a set of known lock-ids from the order list
-    my %known = map { $_ => 1 } @{ $order };
+    # Build a set of known lock-ids from the order list (which is now array-of-arrays)
+    my %known;
+    for my $step ( @{ $order } )
+    {
+        my @ids = ref $step eq 'ARRAY' ? @{ $step } : ( $step );
+        $known{ $_ } = 1 for @ids;
+    }
 
     # Check all connected clients for unknown lock-ids
     my $clients = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' } || {};
@@ -505,7 +705,8 @@ sub _lock_server_process_unknown
         {
             $debug->( 'STDERR', __LINE__, "Unknown lock-id '$lid' (cid $cid): sending run (default=run)." );
             my $msg = { 'event' => 'run' };
-            poe->kernel->yield( 'afunixsrv_server_send', $cid, $msg );
+            my $wheel = $clients->{ $cid }->{ 'wheel' };
+            $wheel->put( $msg ) if $wheel;
             $clients->{ $cid }->{ 'unknown_handled' } = 1;
         }
         elsif ( $default_act eq 'runlast' )
@@ -537,8 +738,9 @@ sub _lock_server_handle_exhaust
     for my $cid ( @{ $queue } )
     {
         $debug->( 'STDERR', __LINE__, "Exhaust: sending run to queued unknown cid $cid." );
-        my $msg = { 'event' => 'run' };
-        poe->kernel->yield( 'afunixsrv_server_send', $cid, $msg );
+        my $msg   = { 'event' => 'run' };
+        my $wheel = poe->heap->{ 'afunixsrv' }->{ 'client' }->{ 'obj' }->{ $cid }->{ 'wheel' };
+        $wheel->put( $msg ) if $wheel;
     }
     poe->heap->{ 'lock' }->{ 'unknown_queue' } = [];
 
@@ -551,9 +753,11 @@ sub _lock_server_handle_exhaust
     elsif ( $action eq 'restart' )
     {
         $debug->( 'STDERR', __LINE__, "Lock order exhausted: restarting order list." );
-        poe->heap->{ 'lock' }->{ 'order_idx' } = 0;
-        poe->heap->{ 'lock' }->{ 'order' }     = [ @{ poe->heap->{ 'lock' }->{ 'order_orig' } } ];
-        poe->heap->{ 'lock' }->{ 'id2cid' }    = {};
+        poe->heap->{ 'lock' }->{ 'order_idx' }      = 0;
+        poe->heap->{ 'lock' }->{ 'order' }          = [ map { [ @{ $_ } ] } @{ poe->heap->{ 'lock' }->{ 'order_orig' } } ];
+        poe->heap->{ 'lock' }->{ 'id2cid' }         = {};
+        poe->heap->{ 'lock' }->{ 'step_completed' } = 0;
+        poe->heap->{ 'lock' }->{ 'run_sent' }       = {};
     }
     elsif ( $action eq 'execute' )
     {
@@ -585,7 +789,7 @@ sub afunixcli_server_input ( $self, $input, $wid )
     $packet =~ s#[\r\n]##g;
     $packet =~ s#\s+# #g;
 
-    $debug->( 'STDERR', __LINE__, "Server(-) RX: $packet" );
+    $debug->( 'STDERR', __LINE__, "Server(-) RX: $packet", 'debug' );
 
     my $event = $input->{ 'event' } || '';
 
@@ -594,7 +798,17 @@ sub afunixcli_server_input ( $self, $input, $wid )
     {
         $debug->( 'STDERR', __LINE__, "Received 'run' from lock server, starting command." );
         poe->heap->{ 'command' }->{ 'lock_cleared' } = 1;
+        # Cancel the timeout if one was set
+        poe->kernel->post( poe->heap->{ '_' }->{ 'main_session' }, 'lock_client_timeout_cancel' );
         poe->kernel->post( poe->heap->{ '_' }->{ 'main_session' }, 'command_start' );
+    }
+    # Server sends health status
+    elsif ( $event eq 'health_status' )
+    {
+        require JSON::MaybeXS;
+        say STDOUT JSON::MaybeXS::encode_json( $input );
+        poe->heap->{ '_' }->{ 'set_exit' }->( 0, 'health-check-ok' );
+        poe->kernel->stop();
     }
 
     return;
@@ -611,7 +825,7 @@ sub afunixsrv_client_error ( $self, $syscall, $errno, $error, $wid )
         $error = "Normal disconnection for wheel: $wid, cid: $cid";
     }
 
-    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error", 'error' );
 
     # Clean up the dead client's state
     if ( defined $cid )
@@ -645,7 +859,7 @@ sub afunixcli_server_error ( $self, $syscall, $errno, $error, $wid )
         $error = "Normal disconnection for wheel: $wid";
     }
 
-    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Server session encountered $syscall error $errno: $error", 'error' );
 
     return;
 }
@@ -808,7 +1022,7 @@ sub command_error ( $self, $syscall, $errno, $error, $wid, @extra )
         return;
     }
 
-    $debug->( 'STDERR', __LINE__, "Command wheel error: $syscall errno=$errno: $error" );
+    $debug->( 'STDERR', __LINE__, "Command wheel error: $syscall errno=$errno: $error", 'error' );
 
     return;
 }
@@ -1022,6 +1236,33 @@ sub lock_trigger_script
     return;
 }
 
+# --- Lock client timeout ---
+
+# Fire when the lock client timeout expires without receiving "run"
+sub lock_client_timeout_fire
+{
+    my $debug = poe->heap->{ '_' }->{ 'debug' };
+    my $opt   = poe->heap->{ '_' }->{ 'opt' };
+
+    # If command already started (run received), ignore
+    return if poe->heap->{ 'command' }->{ 'lock_cleared' };
+
+    $debug->( 'STDERR', __LINE__,
+        "WARNING: Lock client timeout reached (" . $opt->lock_client_timeout . "s), starting command without server permission.",
+        'error' );
+    poe->heap->{ 'command' }->{ 'lock_cleared' } = 1;
+    poe->kernel->yield( 'command_start' );
+
+    return;
+}
+
+# Cancel the lock client timeout (called when "run" is received)
+sub lock_client_timeout_cancel
+{
+    poe->kernel->delay( 'lock_client_timeout_fire' );
+    return;
+}
+
 # --- Signal handlers ---
 
 sub sig_int
@@ -1128,6 +1369,14 @@ sub scheduler
         # Lock client mode: wait for the server to tell us to run
         # The afunixcli_server_input handler will post command_start when it receives "run"
         $debug->( 'STDERR', __LINE__, "Scheduler: lock-client mode, waiting for server signal." );
+
+        # Set a timeout if configured
+        my $timeout = $opt->lock_client_timeout || 0;
+        if ( $timeout > 0 )
+        {
+            $debug->( 'STDERR', __LINE__, "Scheduler: lock-client timeout set to ${timeout}s." );
+            poe->kernel->delay( 'lock_client_timeout_fire' => $timeout );
+        }
     }
     elsif ( $opt->lock_server )
     {
@@ -1156,12 +1405,26 @@ __END__
     shell$ aep --lock-server --lock-server-order "db,redis,app" \
                --lock-server-exhaust-action exit
 
-    # Lock client: wait for permission to start
-    shell$ aep --lock-client --lock-id db --command /usr/bin/postgres \
-               --lock-trigger "both:text:ready to accept connections"
+    # Lock server with parallel groups (redis1 and redis2 start simultaneously)
+    shell$ aep --lock-server --lock-server-order "db,redis1||redis2,nginx"
 
-    # Docker health check
+    # Lock client via TCP (default for Docker networking)
+    shell$ aep --lock-client --lock-id db --command /usr/bin/postgres \
+               --lock-trigger "both:text:ready to accept connections" \
+               --lock-transport tcp --lock-client-host aep-master
+
+    # Lock client with timeout (start after 30s even without server)
+    shell$ aep --lock-client --lock-id db --command /usr/bin/postgres \
+               --lock-client-timeout 30
+
+    # Docker health check (returns JSON status)
     shell$ aep --docker-health-check
+
+    # Quiet mode (errors only)
+    shell$ aep --quiet --lock-client --lock-id db --command /usr/bin/myapp
+
+    # Verbose mode (includes packet dumps)
+    shell$ aep --verbose --lock-server --lock-server-order "db,app"
 
 =head1 DESCRIPTION
 
@@ -1174,10 +1437,15 @@ often start simultaneously but depend on each other. AEP solves this by
 providing a lock server that controls the order in which services start,
 waiting for each service to report readiness before allowing the next to begin.
 
-AEP communicates between containers over a Unix domain socket using a JSON
-protocol. It supports five trigger types for detecting when a service is
-ready: time delay, text match, regex match, TCP connect probe, and external
-script.
+AEP communicates between containers over both TCP and Unix domain sockets
+using a JSON protocol. TCP transport is the default for Docker networking,
+eliminating the need for shared volumes. It supports five trigger types for
+detecting when a service is ready: time delay, text match, regex match, TCP
+connect probe, and external script.
+
+The lock-server-order option supports parallel groups using the C<||>
+operator. For example, C<db,redis1||redis2,nginx> starts db first, then
+redis1 and redis2 simultaneously, then nginx after both are ready.
 
 =head1 ARGUMENTS
 
@@ -1287,8 +1555,15 @@ If a client connects with a lock-id not in the order list, what action to take.
 =head3 lock-server-order (string)
 
 The list of lock-ids and the order to allow them to run, comma separated.
+Use C<||> within a step to run multiple clients in parallel.
 
 Example: C<db,redis,nginx>
+
+Example with parallel groups: C<db,redis1||redis2,nginx>
+
+In the parallel example, C<db> starts first, then C<redis1> and C<redis2>
+start simultaneously. Only after both report trigger success does C<nginx>
+start.
 
 Each entry must match a lock-id sent by a connecting client. The server
 sends a C<run> signal to each client in order, waiting for each to report
@@ -1342,6 +1617,28 @@ Defaults to 3.
 =head3 lock-client-retry-delay (integer)
 
 How long to wait in seconds before retrying the connection. Defaults to 5.
+
+=head3 lock-client-timeout (integer)
+
+Maximum seconds to wait for the lock server to send the C<run> signal.
+If the timeout expires without receiving permission, the command starts
+anyway and a warning is logged. Set to 0 (default) to wait forever.
+
+=head3 lock-transport (string)
+
+Default value: auto
+
+Which transport to use for connecting to the lock server.
+
+=over 4
+
+=item * auto - Try TCP first, fall back to Unix socket if TCP fails.
+
+=item * tcp - Use TCP only. Connect to lock-client-host:lock-client-port.
+
+=item * unix - Use Unix socket only.
+
+=back
 
 =head3 lock-trigger (string)
 
@@ -1401,12 +1698,28 @@ The identity this client reports to the lock server. Must match an entry in
 the server's C<--lock-server-order> list (unless C<--lock-server-default> is
 set to C<run> or C<runlast>).
 
+=head2 Output control
+
+=head3 quiet
+
+Suppress informational output. Only errors and the final exit message are
+shown.
+
+=head3 verbose
+
+Show detailed debug output including packet contents (the serialized JSON
+sent and received).
+
 =head2 Other
 
 =head3 docker-health-check
 
-Connect to the lock server socket and return an exit code for use with
-Docker HEALTHCHECK. Returns 0 (healthy) or 1 (unhealthy).
+Connect to the lock server and request a health status report. The server
+responds with JSON containing the current order progress, connected clients,
+and which services have been cleared or are still waiting.
+
+Returns exit code 0 (healthy) with JSON on stdout, or exit code 1
+(unhealthy) if the connection fails.
 
 =head1 ENVIRONMENT
 

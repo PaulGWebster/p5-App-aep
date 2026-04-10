@@ -1,6 +1,15 @@
 Revision history for perl application aep (Advanced Entry Point)
 
 {{ $NEXT }}
+  - Added TCP transport for lock server/client (--lock-server-host, --lock-server-port, --lock-transport)
+  - Server now listens on both Unix socket and TCP simultaneously
+  - Client supports auto, tcp, and unix transport modes with fallback
+  - Added parallel groups in lock-server-order using || operator (e.g. "db,redis1||redis2,nginx")
+  - Added --lock-client-timeout option to start command after timeout without server permission
+  - Added --quiet and --verbose options for log level control
+  - Added proper health check protocol: client sends health_check, server responds with JSON status
+  - Updated docker-compose.yml to use TCP transport instead of shared volumes
+  - Updated POD documentation for all new options
 
 0.012     2026-04-10 17:01:02 UTC
   - Implemented command execution via POE::Wheel::Run

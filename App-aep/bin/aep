@@ -148,7 +148,7 @@ my @opt_desc = (
     [
         'lock-server-order=s',
         'The list of ids and the order to allow them to run, '
-        . 'comma separated, for example: db,redis1,redis2,redis3,redis4,nginx',
+        . 'comma separated. Use || for parallel groups, e.g.: db,redis1||redis2,nginx',
         {
             'default' => '',
         },
@@ -186,6 +186,20 @@ my @opt_desc = (
             'default' => 5,
         },
     ],
+    [
+        'lock-client-timeout=i',
+        'Maximum seconds to wait for the lock server to send run. 0 = wait forever. Default 0.',
+        {
+            'default' => 0,
+        },
+    ],
+    [
+        'lock-transport=s',
+        'Transport to use for lock client: tcp, unix, or auto (try TCP then Unix). Default auto.',
+        {
+            'default' => 'auto',
+        },
+    ],
     [],
     [
         'lock-client-host=s',
@@ -213,6 +227,21 @@ my @opt_desc = (
         'What ID we should say we are, mandatory when acting as a lock-client',
         {
             'default' => $$,
+        },
+    ],
+    [],
+    [
+        'quiet',
+        'Suppress informational output, only show errors.',
+        {
+            'default' => 0,
+        },
+    ],
+    [
+        'verbose',
+        'Show detailed debug output including packet contents.',
+        {
+            'default' => 0,
         },
     ],
     [],
@@ -268,8 +297,11 @@ sub main ( @args )
 
     # Create an appropriate heap for our session
     my $func_map = _create_heap( $args[ 0 ], $args[ 1 ] );
-    $func_map->{ '_' }->{ 'debug' }    = sub { _func_debug( @_ ) };
-    $func_map->{ '_' }->{ 'set_exit' } = $exit_func;
+
+    my $log_level = $opt->quiet ? 'quiet' : ( $opt->verbose ? 'verbose' : 'info' );
+    $func_map->{ '_' }->{ 'log_level' } = $log_level;
+    $func_map->{ '_' }->{ 'debug' }     = sub { _func_debug( $log_level, @_ ) };
+    $func_map->{ '_' }->{ 'set_exit' }  = $exit_func;
 
     my $session = POE::Session::PlainCall->create(
         'package'   => 'App::aep',
@@ -280,6 +312,7 @@ sub main ( @args )
                 _start sig_int sig_term sig_chld sig_usr scheduler
                 command_start command_stdout command_stderr command_close command_error
                 lock_trigger_fire lock_trigger_connect lock_trigger_script
+                lock_client_timeout_fire lock_client_timeout_cancel
             )
         ],
     );
@@ -378,8 +411,21 @@ sub _check_positive_number ( $val )
 }
 
 # Show debug messages
-sub _func_debug ( $pipe, $line, $message )
+# $log_level: 'quiet', 'info', or 'verbose' (global setting from --quiet/--verbose)
+# $level: 'error', 'info', or 'debug' (per-message level, defaults to 'info')
+sub _func_debug ( $log_level, $pipe, $line, $message, $level = 'info' )
 {
+    # Filter messages based on log level
+    if ( $log_level eq 'quiet' && $level ne 'error' )
+    {
+        return;
+    }
+    if ( $log_level eq 'info' && $level eq 'debug' )
+    {
+        return;
+    }
+    # 'verbose' shows everything
+
     my @buffer;
 
     if ( $message && ref( $message ) eq 'HASH' )
@@ -433,8 +479,9 @@ exit do
         $exit_code = 255;
     }
 
+    my $final_log_level = $opt->quiet ? 'quiet' : ( $opt->verbose ? 'verbose' : 'info' );
     _func_debug(
-        'STDERR', __LINE__,
+        $final_log_level, 'STDERR', __LINE__,
         {
             'lines' => [ "Child exiting with: $exit_code", "Status: $exit_reason", 'Perl exception: ' . $!, ]
         }

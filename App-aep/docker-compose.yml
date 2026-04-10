@@ -7,8 +7,8 @@ services:
       - "--lock-server"
       - "--lock-server-order=db,app"
       - "--lock-server-exhaust-action=exit"
-    volumes:
-      - aep-socket:/tmp
+    expose:
+      - "60000"
 
   db:
     build: .
@@ -18,8 +18,8 @@ services:
       - "--command=echo"
       - "--command-args=db started"
       - "--lock-trigger=none:time:1000"
-    volumes:
-      - aep-socket:/tmp
+      - "--lock-transport=tcp"
+      - "--lock-client-host=aep-master"
     depends_on:
       - aep-master
 
@@ -31,10 +31,7 @@ services:
       - "--command=echo"
       - "--command-args=app started"
       - "--lock-trigger=none:time:1000"
-    volumes:
-      - aep-socket:/tmp
+      - "--lock-transport=tcp"
+      - "--lock-client-host=aep-master"
     depends_on:
       - aep-master
-
-volumes:
-  aep-socket:

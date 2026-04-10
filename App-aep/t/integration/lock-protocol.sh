@@ -49,7 +49,7 @@ echo "[Test 3] Lock client 'app' gets run after 'db' completes"
 
 # Check server received trigger_ok and advanced
 SERVER_LOGS=$(docker logs aep-int-server 2>&1)
-echo "$SERVER_LOGS" | grep -q "trigger_ok" && pass "Server received trigger_ok from db" || fail "Server did not receive trigger_ok"
+echo "$SERVER_LOGS" | grep -q "trigger success" && pass "Server received trigger_ok from db" || fail "Server did not receive trigger_ok"
 
 APP_OUTPUT=$(timeout 15 docker run --rm --name aep-int-app -v "$SOCKET_VOL:/tmp" \
     "$IMAGE" --lock-client --lock-id app \
