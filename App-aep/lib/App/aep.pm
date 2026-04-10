@@ -51,6 +51,9 @@ sub _start ( $self, @args )
     poe->kernel->sig( CHLD => 'sig_chld' );
     poe->kernel->sig( USR  => 'sig_usr' );
 
+    # Store the main session ID so sub-sessions can post events back to us
+    poe->heap->{ '_' }->{ 'main_session' } = poe->session->ID;
+
     my $debug = poe->heap->{ '_' }->{ 'debug' };
     $debug->( 'STDERR', __LINE__, 'Signals(INT,TERM,CHLD,USR) trapped.' );
 
@@ -521,12 +524,12 @@ sub afunixcli_server_input ( $self, $input, $wid )
 
     my $event = $input->{ 'event' } || '';
 
-    # Server says run - start our command
+    # Server says run - start our command (post to main session, not this socket session)
     if ( $event eq 'run' )
     {
         $debug->( 'STDERR', __LINE__, "Received 'run' from lock server, starting command." );
         poe->heap->{ 'command' }->{ 'lock_cleared' } = 1;
-        poe->kernel->yield( 'command_start' );
+        poe->kernel->post( poe->heap->{ '_' }->{ 'main_session' }, 'command_start' );
     }
 
     return;
@@ -676,6 +679,13 @@ sub command_close ( $self, $wid )
 
     if ( $no_restart )
     {
+        # In lock-client mode, don't exit yet -- wait for the trigger to fire
+        # and report back to the server before shutting down
+        if ( $opt->lock_client && !poe->heap->{ 'command' }->{ 'trigger_ok' } )
+        {
+            $debug->( 'STDERR', __LINE__, "Command exited, waiting for lock trigger before shutdown." );
+            return;
+        }
         $debug->( 'STDERR', __LINE__, "Command exited, no-restart flag set." );
         poe->heap->{ '_' }->{ 'set_exit' }->( '0', 'command-exited-norestart' );
         return;
@@ -816,11 +826,21 @@ sub lock_trigger_fire
 
     $debug->( 'STDERR', __LINE__, "Lock trigger fired, reporting success to server." );
 
-    # Send trigger_ok to the lock server
+    # Send trigger_ok directly via the wheel (not via yield, to avoid cross-session issues)
     if ( poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'wheel' } )
     {
         my $msg = { 'event' => 'trigger_ok', 'lock_id' => $opt->lock_id };
-        poe->kernel->yield( 'afunixcli_client_send', $msg );
+        poe->heap->{ 'afunixcli' }->{ 'server' }->{ 'wheel' }->put( $msg );
+        $debug->( 'STDERR', __LINE__, "Sent trigger_ok to server." );
+    }
+
+    # If the command has already exited, schedule shutdown after a brief delay
+    # to allow the trigger_ok message to flush to the server
+    if ( !poe->heap->{ 'command' }->{ 'running' } )
+    {
+        $debug->( 'STDERR', __LINE__, "Trigger fired and command already exited, shutting down shortly." );
+        poe->heap->{ '_' }->{ 'set_exit' }->( '0', 'trigger-ok-command-exited' );
+        poe->kernel->delay( 'scheduler' => 0.5 );
     }
 
     return;
@@ -985,10 +1005,18 @@ sub scheduler
     my $debug = poe->heap->{ '_' }->{ 'debug' };
     my $opt   = poe->heap->{ '_' }->{ 'opt' };
 
+    # If called after trigger_ok, this is a deferred shutdown
+    if ( poe->heap->{ 'command' }->{ 'trigger_ok' } && !poe->heap->{ 'command' }->{ 'running' } )
+    {
+        $debug->( 'STDERR', __LINE__, "Scheduler: deferred shutdown after trigger." );
+        poe->kernel->stop();
+        return;
+    }
+
     if ( $opt->lock_client )
     {
         # Lock client mode: wait for the server to tell us to run
-        # The afunixcli_server_input handler will yield command_start when it receives "run"
+        # The afunixcli_server_input handler will post command_start when it receives "run"
         $debug->( 'STDERR', __LINE__, "Scheduler: lock-client mode, waiting for server signal." );
     }
     elsif ( $opt->lock_server )

@@ -356,13 +356,11 @@ sub _create_heap ( $opt, $usage )
         'args' => {},
     };
 
-    # Convert AEP_ prefixed env vars to config keys (strip prefix, lowercase)
+    # Use AEP_ prefixed env vars as config keys directly (preserve full key name)
     my $env_config = {};
     for my $key ( keys %{ $sources->{ 'env' } } )
     {
-        my $config_key = $key;
-        $config_key =~ s{^\Q$env_prefix\E}{};
-        $env_config->{ $config_key } = $sources->{ 'env' }->{ $key };
+        $env_config->{ $key } = $sources->{ 'env' }->{ $key };
     }
     $sources->{ 'env' } = $env_config;
 
